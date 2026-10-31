@@ -153,7 +153,7 @@ def build_state(img: Image.Image) -> ScreenState:
     line_phrases: list[list[Phrase]] = []
 
     for ln in lines:
-        phrases = group_phrases(ln)
+        phrases = [q for p in group_phrases(ln) for q in _split_at_borders(p, L)]
         line_phrases.append(phrases)
         line_texts.append("   ".join(p.text for p in phrases))
 
@@ -224,6 +224,34 @@ def build_state(img: Image.Image) -> ScreenState:
 
     return ScreenState(img=img, elements=elements, hidden_text=[w.text for w in hidden], menu=menu, title=title,
                        fingerprint=fingerprint, version=version, hoy=hoy, table=table, lines=line_texts)
+
+
+def _split_at_borders(p: Phrase, L: np.ndarray) -> list[Phrase]:
+    """Dos botones vecinos ("Nuevo cliente" | "Exportar") pueden quedar en una sola frase: se parte donde hay
+    un borde visual entre dos palabras (el fondo del hueco no es uniforme)."""
+    if len(p.words) < 2:
+        return [p]
+    out, cur = [], [p.words[0]]
+    y1, y2 = p.y, p.y2
+    for w in p.words[1:]:
+        if not w.text.strip("|_[]!"):  # el OCR leyó el borde como una "palabra" '|': separador
+            out.append(Phrase(cur)) if cur else None
+            cur = []
+            continue
+        if not cur:
+            cur = [w]
+            continue
+        a, b = cur[-1].x + cur[-1].w + 1, w.x - 1  # sin el filo de las letras
+        if b - a >= 2:
+            cols = L[y1:y2 + 1, a:b].mean(axis=0)
+            if cols.size and cols.max() - cols.min() > 45:
+                out.append(Phrase(cur))
+                cur = [w]
+                continue
+        cur.append(w)
+    if cur:
+        out.append(Phrase(cur))
+    return out or [p]
 
 
 def _box_from_interior(L: np.ndarray, x: int, y: int) -> Optional[tuple[int, int, int, int]]:
