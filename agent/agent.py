@@ -211,7 +211,7 @@ class Session:
 
     # ------------------------------------------------------------------ leer tabla en todas las páginas
     def _next_button(self, s: ScreenState) -> Optional[tuple[int, int]]:
-        """Botón de página siguiente. El OCR puede pegarlo a 'Página 1': entonces se apunta a su parte derecha."""
+        """Botón de página siguiente. El OCR puede pegarlo a 'Página 1', leerlo mal ('Siguients') o no leerlo."""
         for e in s.elements:
             t = norm(e.text)
             if t in NEXT_PAGE or t.startswith("siguiente"):
@@ -221,6 +221,13 @@ class Session:
             if t.endswith("siguiente") and e.y > (s.table.header_y if s.table else 0):
                 cw = (e.x2 - e.x) / max(1, len(e.text))
                 return int(e.x2 - cw * len("siguiente") / 2), e.cy
+        low = [e for e in s.elements if e.y > 0.75 * s.img.height]  # franja inferior, donde va la paginación
+        for e in low:  # lectura defectuosa del propio botón
+            if len(e.text) <= 14 and difflib.SequenceMatcher(None, norm(e.text), "siguiente").ratio() >= 0.7:
+                return e.cx, e.cy
+        for e in low:  # el botón está pegado a la derecha de "Página N"
+            if re.fullmatch(r"pagina \d+", norm(e.text)):
+                return e.x2 + 52, e.cy
         return None
 
     async def read_all_pages(self, filtros: dict) -> dict:
@@ -228,6 +235,8 @@ class Session:
         prev_key = None
         last_nxt = None
         pages = 0
+        completa = False  # solo es True si se llegó de verdad a la última página
+        last_len = 0
         while pages < 25 and self.time_left() > 15:
             s = self.state
             if not s.table:
@@ -235,13 +244,16 @@ class Session:
             rows = await asyncio.to_thread(read_table_rows, s.img, s.table)
             key = json.dumps(rows[:3], ensure_ascii=False)
             if key == prev_key:
-                break  # "Siguiente" no avanzó: era la última página
+                completa = pages >= 2 or last_len < 15  # "Siguiente" no avanzó: última página (o el clic no hizo nada)
+                break
             prev_key = key
+            last_len = len(rows)
             all_rows.extend(rows)
             pages += 1
             # el cursor queda encima del botón y tapa su texto: si no se lee, se reusa la misma posición
             nxt = self._next_button(s) or last_nxt
             if not nxt:
+                completa = last_len < 15  # sin botón y con una página llena: no se sabe si hay más
                 break
             last_nxt = nxt
             await self.vnc.click(*nxt)
@@ -256,10 +268,13 @@ class Session:
             col = max(cols, key=lambda c: difflib.SequenceMatcher(None, norm(c), norm(column)).ratio())
             target = norm(str(value))
             matched = [r for r in matched if difflib.SequenceMatcher(None, norm(r.get(col, "")), target).ratio() >= 0.9]
-        res = {"paginas": pages, "filas_total": len(all_rows), "filas_que_coinciden": len(matched),
+        res = {"paginas": pages, "completa": completa, "filas_total": len(all_rows), "filas_que_coinciden": len(matched),
                "filtros": filtros, "columnas": cols, "muestra": matched[:12]}
+        if not completa:
+            res["aviso"] = ("NO se pudo confirmar que se leyeron todas las páginas: el conteo puede estar incompleto. "
+                            "No lo uses como respuesta; filtra con la app para que quepa en una página o falla explicándolo.")
         self.last_table = res
-        self.trace.event("tabla", f"{len(all_rows)} filas en {pages} páginas; coinciden {len(matched)}",
+        self.trace.event("tabla", f"{len(all_rows)} filas en {pages} páginas ({'completa' if completa else 'INCOMPLETA'}); coinciden {len(matched)}",
                          data={k: v for k, v in res.items() if k != "muestra"})
         return res
 
@@ -462,6 +477,8 @@ class Session:
     # ------------------------------------------------------------------ verificación antes de "terminada"
     def verify_write(self) -> Optional[str]:
         op = self.intent.get("op")
+        if op == "consultar" and self.last_table and not self.last_table.get("completa", True):
+            return "la última lectura de la tabla no se confirmó completa (puede haber más páginas): el conteo no es fiable"
         if op in ("crear", "editar"):
             if self.saves == 0:
                 return "todavía no se ha guardado ningún cambio"
