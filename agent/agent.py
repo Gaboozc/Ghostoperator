@@ -166,8 +166,9 @@ class Session:
     async def read_all_pages(self, filtros: dict) -> dict:
         all_rows: list[dict] = []
         prev_key = None
+        last_nxt = None
         pages = 0
-        while pages < 15 and self.time_left() > 15:
+        while pages < 25 and self.time_left() > 15:
             s = self.state
             if not s.table:
                 break
@@ -178,10 +179,13 @@ class Session:
             prev_key = key
             all_rows.extend(rows)
             pages += 1
-            nxt = self._next_button(s)
+            # el cursor queda encima del botón y tapa su texto: si no se lee, se reusa la misma posición
+            nxt = self._next_button(s) or last_nxt
             if not nxt:
                 break
+            last_nxt = nxt
             await self.vnc.click(*nxt)
+            await self.vnc.move(self.vnc.width - 5, self.vnc.height - 5)
             self.trace.actions += 1
             await self.look("pagina")
         cols = list(all_rows[0].keys()) if all_rows else []
@@ -271,6 +275,7 @@ class Session:
             if blocked:
                 return blocked
             await self.vnc.click(x, y)
+            await self.vnc.move(self.vnc.width - 5, self.vnc.height - 5)  # que el cursor no tape el texto
             self.trace.actions += 1
             self.flow_steps.append({"accion": "clic", "texto": label})
             ns = await self.look()
