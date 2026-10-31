@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageOps
 
 from .ocr import Phrase, Word, apply_contrast, group_lines, group_phrases, run_tesseract, _luma
 
@@ -76,6 +76,8 @@ class ScreenState:
     hoy: Optional[str]
     table: Optional[Table]
     lines: list[str] = field(default_factory=list)
+    view: Optional[Image.Image] = None  # captura tal cual (en tema oscuro, img es la invertida)
+    dark: bool = False
 
     # -------------------------------------------------- búsqueda de elementos por texto (anclas)
     def find(self, text: str, role: Optional[str] = None, exact: bool = False) -> Optional[Element]:
@@ -127,7 +129,7 @@ class ScreenState:
         return "\n".join(out)
 
     def marked_image(self) -> Image.Image:
-        im = self.img.convert("RGB").copy()
+        im = (self.view or self.img).convert("RGB").copy()
         d = ImageDraw.Draw(im)
         for e in self.elements:
             color = (220, 40, 40) if e.role == "campo" else (30, 90, 200)
@@ -141,6 +143,10 @@ class ScreenState:
 
 # ====================================================== construcción
 def build_state(img: Image.Image) -> ScreenState:
+    view = img
+    dark = float(_luma(img).mean()) < 110
+    if dark:  # tema oscuro: se percibe sobre la imagen invertida (cajas de campo claras, texto oscuro); el modelo ve la original
+        img = ImageOps.invert(img.convert("RGB"))
     words = run_tesseract(img)
     visible, hidden = apply_contrast(img, words)
     lines = group_lines(visible)
@@ -223,13 +229,16 @@ def build_state(img: Image.Image) -> ScreenState:
     for e in list(elements):
         if e.role not in ("texto",) or len(e.text.split()) > 4 or e.cy > table_top:
             continue
+        if np.median(L[e.y:e.y2 + 1, e.x:e.x2 + 1]) < 180:  # texto de botón (fondo oscuro), no una etiqueta
+            continue
         box = field_below(L, e) or field_right(L, e)
         if box:
             eid += 1
             elements.append(Element(eid, f"campo {e.text}", *box, role="campo"))
 
     return ScreenState(img=img, elements=elements, hidden_text=[w.text for w in hidden], menu=menu, title=title,
-                       fingerprint=fingerprint, version=version, hoy=hoy, table=table, lines=line_texts)
+                       fingerprint=fingerprint, version=version, hoy=hoy, table=table, lines=line_texts,
+                       view=view, dark=dark)
 
 
 def _is_link(rgb: np.ndarray, L: np.ndarray, e: "Element") -> bool:
@@ -288,7 +297,7 @@ def _box_from_interior(L: np.ndarray, x: int, y: int) -> Optional[tuple[int, int
     while y2 < H - 1 and L[y2 + 1, x + 2] >= 200:
         y2 += 1
     w, h = x2 - x1, y2 - y1
-    if 40 <= w <= 700 and 12 <= h <= 48:
+    if 90 <= w <= 900 and 12 <= h <= 48:  # < 90 px es un botón (ej. 'Volver'), no un campo
         return x1, y1, x2, y2
     return None
 

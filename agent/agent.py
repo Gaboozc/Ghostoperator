@@ -33,6 +33,15 @@ UNSAFE_MENU = re.compile(r"\b(salir|cerrar|logout|log out|desconectar|sincroniza
 SECRET_VALUE = re.compile(r"(clave|contrase[ñn]a|token|api\s*key|secreto)[^:]{0,40}:\s*([A-Za-z0-9][\w\-\.]{5,})", re.I)
 
 
+MODAL_BUTTONS = {"aceptar", "cerrar", "entendido", "continuar", "ok", "de acuerdo", "omitir", "mas tarde", "x", "no", "si",
+                 "cancelar", "descartar"}
+
+
+def looks_modal(s: ScreenState) -> bool:
+    """Hay una ventana emergente encima (botones típicos de diálogo a la vista): no se explora detrás de ella."""
+    return sum(norm(e.text) in MODAL_BUTTONS for e in s.elements if e.role != "menu") >= 1
+
+
 def _menu_like(text: str) -> bool:
     """Una opción de menú es corta y no es una frase (el texto de fondo de la pantalla no cuenta)."""
     t = text.rstrip(" >»▸►").strip()
@@ -59,6 +68,7 @@ class Session:
         self.verify_refusals = 0
         self.last_table: Optional[dict] = None
         self.route_used: Optional[list[str]] = None
+        self.blocked_acts: set[str] = set()  # acciones repetidas sin efecto: no se vuelven a ejecutar
 
     # ------------------------------------------------------------------ utilidades
     def time_left(self) -> float:
@@ -443,18 +453,21 @@ async def _run(sess: Session) -> tuple[str, str]:
         return "fallida", build_summary("fallida", razon=f"falta información: {intent['faltan_datos']}.")
 
     # ---- 4. ubicar y aprender: recorrido de menús la primera vez que se ve la app
-    if not mem.menus and s.menu:
-        await sess.explore_menus()
-        mem.save()
+    # (se hace dentro del bucle: si la app abre con un modal, primero el modelo lo cierra y luego se explora)
 
     key = f"{intent.get('op')}:{intent.get('entidad')}"
     flow = mem.flow(key)
 
     # ---- 5 y 6. resolver objetivo, actuar y verificar (bucle con el modelo en los cruces)
+    explored = False
     for _ in range(config.MAX_AGENT_STEPS):
         if sess.time_left() <= 0:
             break
         sess.check_cancel()
+        if not explored and not mem.menus and sess.state.menu and not looks_modal(sess.state):
+            explored = True
+            await sess.explore_menus()
+            mem.save()
         user = (
             f"TAREA: {sess.tarea}\n"
             f"INTERPRETACIÓN: {json.dumps(intent, ensure_ascii=False)}\n\n"
@@ -504,13 +517,19 @@ async def _run(sess: Session) -> tuple[str, str]:
 
         if not act.get("accion"):
             act["accion"] = "leer_tabla" if ("columna" in act or "filtros" in act) else None
-        result = await sess.execute(act) if act.get("accion") else "falta 'accion' en el JSON; devuelve una acción válida"
+        if json.dumps({k: v for k, v in act.items() if k != "por_que"}, sort_keys=True) in sess.blocked_acts:
+            result = "bloqueado: esta misma acción ya se repitió sin efecto; elige otra (clic_xy sobre la captura)"
+        elif act.get("accion"):
+            result = await sess.execute(act)
+        else:
+            result = "falta 'accion' en el JSON; devuelve una acción válida"
         tr.event("resultado", result[:300])
         step = f"{act.get('accion')} {json.dumps({k: v for k, v in act.items() if k not in ('accion', 'por_que')}, ensure_ascii=False)} -> {result}"
         if sess.history and sess.history[-1].split(". ", 1)[-1].startswith(step[:120]) and (
                 "inexistente" in result or "bloqueado" in result or "NO cambió" in result or "no se abrió" in result):
-            step += (" || REPETISTE la misma acción sin efecto: cambia de estrategia (para abrir un registro usa su"
-                     " enlace, rol enlace, ej. el código; o un botón Editar/Ver; o clic_xy en otro punto)")
+            step += (" || REPETISTE la misma acción sin efecto: el id no es el control que crees. Mira la captura y usa"
+                     " clic_xy con las coordenadas del botón (en un modal: sus botones), o un enlace para abrir registros")
+            sess.blocked_acts.add(json.dumps({k: v for k, v in act.items() if k != "por_que"}, sort_keys=True))
         sess.log(step)
 
     mem.fail_flow(key)
