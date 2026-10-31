@@ -97,6 +97,32 @@ class ScreenState:
         t = norm(text)
         return [e for e in self.elements if t and t in norm(e.text)]
 
+    def input_point(self, e: Element) -> tuple[int, int]:
+        """Dónde hacer clic para escribir en el campo al que se refiere N: si N es el valor que ya está dentro de una
+        caja (bordes pegados arriba y abajo del texto) se pulsa sobre él; si es su etiqueta, dentro de la caja de abajo."""
+        L = _luma(self.img)
+        H, W = L.shape
+        x = min(W - 1, e.x2 + 6)  # justo a la derecha del texto: fondo de la caja, sin trazos de letras
+
+        def dist(step: int) -> Optional[int]:
+            for d in range(1, 13):
+                yy = e.cy + step * d
+                if not 0 <= yy < H:
+                    return None
+                if L[yy, x] < 215:  # borde de la caja
+                    return d
+            return None
+
+        up, down = dist(-1), dist(1)
+        if up is not None and down is not None and abs(up - down) <= 4:  # centrado entre dos bordes: valor dentro de la caja
+            return e.cx, e.cy
+        x1, x2 = e.x + 2, min(W, e.x + 42)
+        for y in range(e.cy + 1, min(H, e.y2 + 26)):
+            # borde superior de la caja bajo la etiqueta: una línea continua (los trazos de letras dejan huecos claros)
+            if float(np.percentile(L[y, x1:x2], 90)) < 225:
+                return min(W - 1, e.x + 25), min(H - 1, y + 9)
+        return e.cx, min(H - 1, e.y2 + 12)
+
     def field_for(self, label: str) -> Optional[Element]:
         t = norm(label)
         for e in self.elements:
@@ -461,6 +487,29 @@ def read_table_rows(img: Image.Image, table: Table) -> list[dict]:
         col = table.columns[k]
         rows[ri][col] = (rows[ri][col] + " " + t).strip()
     return rows
+
+
+def label_at(img: Image.Image, x: int, y: int) -> str:
+    """Texto del control que hay bajo (x, y), leído en un recorte: sirve cuando el OCR general no lo detectó
+    (en la app v4.2 "Exportar" no salía) y las guardas de guardar/exportar necesitan saber qué se pulsa."""
+    import csv, io, subprocess, tempfile
+    from pathlib import Path
+    from . import config
+
+    box = (max(0, x - 70), max(0, y - 14), min(img.width, x + 70), min(img.height, y + 14))
+    crop = img.convert("L").crop(box)
+    if float(np.median(np.asarray(crop))) < 128:  # texto claro sobre fondo oscuro
+        crop = ImageOps.invert(crop)
+    crop = crop.resize((crop.width * 4, crop.height * 4), Image.LANCZOS)
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            pth = Path(td) / "c.png"
+            crop.save(pth)
+            res = subprocess.run([config.TESSERACT_CMD, str(pth), "stdout", "-l", config.OCR_LANG, "--psm", "7"],
+                                 capture_output=True, text=True, timeout=10)
+        return res.stdout.strip()
+    except Exception:
+        return ""
 
 
 def parse_date(s: str) -> Optional[tuple[int, int, int]]:

@@ -19,7 +19,7 @@ from .llm import PARSE_SYSTEM, STEP_SYSTEM, LLMError, chat_json
 from .memory import Memory
 from .report import build_summary, looks_secret_context
 from .rfb import RFBClient
-from .screen import Element, ScreenState, build_state, norm, read_table_rows
+from .screen import Element, ScreenState, build_state, label_at, norm, read_table_rows
 from .trace import Trace
 
 log = logging.getLogger("ghost.agent")
@@ -71,6 +71,7 @@ class Session:
         self.last_table: Optional[dict] = None
         self.route_used: Optional[list[str]] = None
         self.blocked_acts: set[str] = set()  # acciones repetidas sin efecto: no se vuelven a ejecutar
+        self._drift_seen: Optional[str] = None
 
     # ------------------------------------------------------------------ utilidades
     def time_left(self) -> float:
@@ -85,10 +86,31 @@ class Session:
         img = await self.vnc.capture_stable()
         s = await asyncio.to_thread(build_state, img)
         self._scan_secrets(s)
+        self._check_drift(s)
         self.state = s
         self.trace.event(label, s.title or "(sin título)", image=img,
                          data={"oculto_ignorado": s.hidden_text[:12]} if s.hidden_text else None)
         return s
+
+    def _check_drift(self, s: ScreenState) -> None:
+        """La app puede cambiar a mitad de la tarea (incidente): si la versión leída cambia y se repite en dos capturas
+        seguidas (un error de OCR no cuenta), se registra el incidente y se invalida el mapa de menús."""
+        if not self.mem or not s.version:
+            return
+        old = self.mem.data.get("version")
+        if not old:
+            self.mem.data["version"] = s.version
+        elif s.version != old:
+            if self._drift_seen == s.version:
+                self.mem.record_incident(f"cambio de versión de la app durante la tarea: {old} -> {s.version}")
+                self.mem.set_menus([])
+                self.mem.data["version"] = s.version
+                self._drift_seen = None
+                self.trace.event("deriva", f"la app cambió de {old} a {s.version} durante la tarea; se invalida el mapa de menús")
+            else:
+                self._drift_seen = s.version
+        else:
+            self._drift_seen = None
 
     def _scan_secrets(self, s: ScreenState) -> None:
         for ln in s.lines:
@@ -254,8 +276,9 @@ class Session:
                 return None
             if op not in ("crear", "editar", "otra"):
                 return "bloqueado: esta tarea no requiere guardar"
-            still_in_form = self.last_save_button and self.state.find(self.last_save_button, exact=True)
-            if self.saves >= 1 and not still_in_form:
+            # en la v4.2 el formulario no se cierra al aplicar: "sigue abierto" ya no prueba que falló; solo un error visible
+            retry_ok = FORM_ERROR.search(norm(self.state.text_blob()))
+            if self.saves >= 1 and not retry_ok:
                 return "bloqueado: ya se guardó; verifica en lugar de guardar otra vez"
             if self.saves >= 3:
                 return "bloqueado: demasiados intentos de guardar"
@@ -293,7 +316,7 @@ class Session:
                     e = min(near, key=lambda el: (el.cx - x) ** 2 + (el.cy - y) ** 2, default=None)
                     if e and (e.cx - x) ** 2 + (e.cy - y) ** 2 > 15 ** 2:
                         e = None
-                label = e.text if e else f"({x},{y})"
+                label = e.text if e else (await asyncio.to_thread(label_at, s.img, x, y)) or f"({x},{y})"
             blocked = self.guard(label)
             if blocked:
                 return blocked
@@ -315,17 +338,13 @@ class Session:
                 return "id inexistente"
             target = e
             if e.role != "campo":
-                # N puede ser el valor que ya está dentro de un campo: el campo (de tamaño razonable) que lo contiene
-                inside = [c for c in s.elements if c.role == "campo" and c.x <= e.cx <= c.x2 and c.y <= e.cy <= c.y2
-                          and c.x2 - c.x < 600]
-                target = inside[0] if inside else (s.field_for(e.text) or e)
+                target = s.field_for(e.text) or e
             if act.get("x") is not None and act.get("y") is not None:  # el modelo apunta a la caja en la captura
                 x, y = int(act["x"]), int(act["y"])
             elif target.role == "campo":
                 x, y = target.cx, target.cy
-            else:  # N es una etiqueta: el campo (o su valor actual) está justo debajo
-                below = [b for b in s.elements if b is not e and 0 < b.y - e.y2 < 25 and abs(b.x - e.x) < 30]
-                x, y = (below[0].cx, below[0].cy) if below else (e.cx, e.y2 + 12)
+            else:  # N es la etiqueta o el valor que ya está dentro del campo
+                x, y = s.input_point(e)
             await self.vnc.replace_field(x, y, text)
             self.trace.actions += 1
             label = target.text.removeprefix("campo ")

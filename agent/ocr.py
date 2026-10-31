@@ -92,14 +92,19 @@ def _dark_regions_inverted(img: Image.Image, k: int = 9) -> Image.Image:
 
 def run_tesseract(img: Image.Image) -> list[Word]:
     s = config.OCR_SCALE
-    big = img.convert("L").resize((int(img.width * s), int(img.height * s)), Image.LANCZOS)
+    gray = img.convert("L")
+    big = gray.resize((int(img.width * s), int(img.height * s)), Image.LANCZOS)
     # Pasada 1: gris normal (texto oscuro sobre claro). Pasada 2: solo las zonas oscuras (botones azules, barra
     # de título) invertidas y binarizadas, el resto en blanco: el texto blanco sobre color queda negro sobre blanco.
-    words: list[Word] = []
+    # Pasada 3: gris a escala 2: Tesseract en modo disperso se salta palabras aisladas según la escala (en la app v4.2
+    # "Exportar" y "Crear pedido" solo salían a escala 2), y esta pasada las recupera.
     light_on_dark = _dark_regions_inverted(img).resize(big.size, Image.LANCZOS)
+    s2 = 2.0
+    small = gray.resize((int(img.width * s2), int(img.height * s2)), Image.LANCZOS)
     from concurrent.futures import ThreadPoolExecutor
 
-    def _one(variant: Image.Image) -> str:
+    def _one(job: tuple[Image.Image, float]) -> tuple[str, float]:
+        variant, scale = job
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "in.png"
             variant.save(p)
@@ -107,12 +112,11 @@ def run_tesseract(img: Image.Image) -> list[Word]:
                 [config.TESSERACT_CMD, str(p), "stdout", "-l", config.OCR_LANG, "--psm", "11", "tsv"],
                 capture_output=True, text=True, timeout=30, env={**__import__("os").environ, "OMP_THREAD_LIMIT": "1"},
             )
-        return res.stdout
+        return res.stdout, scale
 
-    with ThreadPoolExecutor(max_workers=2) as ex:  # las dos pasadas en paralelo
-        outputs = list(ex.map(_one, (big, light_on_dark)))
-    for out in outputs:
-        for row in csv.DictReader(io.StringIO(out), delimiter="\t", quoting=csv.QUOTE_NONE):
+    def _parse(out: str, scale: float) -> list[Word]:
+        found: list[Word] = []
+        for row in csv.DictReader(io.StringIO(out), delimiter="	", quoting=csv.QUOTE_NONE):
             t = (row.get("text") or "").strip()
             try:
                 conf = float(row.get("conf") or -1)
@@ -120,9 +124,20 @@ def run_tesseract(img: Image.Image) -> list[Word]:
                 conf = -1
             if not t or conf < 30:
                 continue
-            words.append(Word(t, int(int(row["left"]) / s), int(int(row["top"]) / s),
-                              max(1, int(int(row["width"]) / s)), max(1, int(int(row["height"]) / s)), conf))
-    return _dedupe(words)
+            found.append(Word(t, int(int(row["left"]) / scale), int(int(row["top"]) / scale),
+                              max(1, int(int(row["width"]) / scale)), max(1, int(int(row["height"]) / scale)), conf))
+        return found
+
+    with ThreadPoolExecutor(max_workers=3) as ex:  # las tres pasadas en paralelo
+        outputs = list(ex.map(_one, ((big, s), (light_on_dark, s), (small, s2))))
+    base = _dedupe(_parse(*outputs[0]) + _parse(*outputs[1]))
+    # la pasada 3 solo rellena huecos: sus cajas incluyen a veces el borde del campo ("[Carrera") y duplicarían texto
+    gaps = [w for w in _parse(*outputs[2]) if not any(_overlaps(w, b) for b in base)]
+    return _dedupe(base + gaps)
+
+
+def _overlaps(a: Word, b: Word) -> bool:
+    return a.x < b.x + b.w and b.x < a.x + a.w and a.y < b.y + b.h and b.y < a.y + a.h
 
 
 def _dedupe(words: list[Word]) -> list[Word]:
