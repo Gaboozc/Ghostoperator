@@ -311,24 +311,32 @@ class Session:
             opt = str(act.get("opcion", ""))
             if not e:
                 return "id inexistente"
-            target = e if e.role == "campo" else (s.field_for(e.text) or e)
-            if target is e and e.role != "campo":
+            target = e
+            if e.role != "campo":
                 # los <select> no son cajas blancas: si N es la etiqueta, el control es el texto justo debajo
-                # (muestra la opción actual); si no hay nada debajo, N ya es el control
-                below = [b for b in s.elements if b is not e and 0 < b.y - e.y2 < 25 and abs(b.x - e.x) < 30]
-                target = below[0] if below else e
+                # (muestra la opción actual, ej. "(seleccione)"); si no, la caja detectada; si no, N ya es el control
+                below = [b for b in s.elements if b is not e and b.role != "campo" and 0 < b.y - e.y2 < 25
+                         and abs(b.x - e.x) < 30]
+                target = below[0] if below else (s.field_for(e.text) or e)
             x, y = target.cx, target.cy
+            before = {(norm(b.text), b.y // 4) for b in s.elements}
             await self.vnc.click(x, y)  # abre la lista nativa
             self.trace.actions += 1
             ls = await self.look("lista")
-            # la lista abierta muestra las opciones como texto bajo el control: clic en la opción exacta
-            opts = [o for o in ls.elements if norm(o.text) == norm(opt) and o.y > y and o.y < y + 400 and abs(o.x - x) < 250]
+            # la lista abierta muestra opciones nuevas bajo el control: clic en la exacta
+            new = [o for o in ls.elements if (norm(o.text), o.y // 4) not in before and y < o.y < y + 400 and abs(o.x - x) < 300]
+            opts = [o for o in new if norm(o.text) == norm(opt)]
             if opts:
                 await self.vnc.click(opts[0].cx, opts[0].cy)
-            else:  # sin opción visible: escribir la opción y Enter
+            elif len(new) >= 2:  # la lista está abierta pero la opción no se ve: escribirla salta a ella
                 await self.vnc.type_text(opt)
                 await asyncio.sleep(0.2)
                 await self.vnc.key("enter")
+            else:  # no se abrió ninguna lista: NO escribir (caería en otro campo)
+                await self.vnc.key("escape")
+                await self.look()
+                return (f"no se abrió una lista desplegable en ({x},{y}) ('{target.text}'); no escribí nada. "
+                        "Usa seleccionar con el id del texto que muestra el valor actual del desplegable, o clic_xy sobre él")
             self.flow_steps.append({"accion": "seleccionar", "campo": e.text.removeprefix("campo "), "opcion": self._slot(opt)})
             ns = await self.look()
             ok = any(norm(opt) in norm(o.text) and abs(o.cy - y) < 15 for o in ns.elements)
