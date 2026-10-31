@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import difflib
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -78,6 +79,7 @@ class ScreenState:
     lines: list[str] = field(default_factory=list)
     view: Optional[Image.Image] = None  # captura tal cual (en tema oscuro, img es la invertida)
     dark: bool = False
+    hoy_dia: Optional[str] = None  # día de la semana junto a la fecha (ej. 'martes')
 
     # -------------------------------------------------- búsqueda de elementos por texto (anclas)
     def find(self, text: str, role: Optional[str] = None, exact: bool = False) -> Optional[Element]:
@@ -142,7 +144,7 @@ class ScreenState:
 
     # -------------------------------------------------- representación para el modelo
     def describe(self, max_elems: int = 160) -> str:
-        out = [f"Pantalla: {self.title or '(sin título)'} | Hoy (según la app): {self.hoy or 'desconocido'}"]
+        out = [f"Pantalla: {self.title or '(sin título)'} | Hoy (según la app): {(self.hoy_dia + ' ') if self.hoy_dia else ''}{self.hoy or 'desconocido'}"]
         if self.menu:
             out.append("Menú superior: " + " | ".join(f"[{m.id}] {m.text}" for m in self.menu))
         # primero controles, etiquetas y campos (los campos se numeran al final); las celdas, hasta el tope
@@ -212,15 +214,22 @@ def build_state(img: Image.Image) -> ScreenState:
 
     first = line_texts[0] if line_texts else ""
     version = (VERSION_RE.search(first) or [""])[0] if first else ""
-    fp_words = [w for w in re.split(r"\s+", first) if w and not any(c.isdigit() for c in w)]
+    head = line_phrases[0][0].text if line_phrases and line_phrases[0] else first  # solo el nombre de la app
+    fp_words = [w for w in re.split(r"\s+", head) if w and not any(c.isdigit() for c in w)]
     stop = {"hoy", "usuario", "hoy:", "usuario:", "·", "-", "|"}
     fingerprint = norm(" ".join(w for w in fp_words if w.lower() not in stop))[:60] or "app"
 
     blob = "\n".join(line_texts)
     hoy = None
-    m = re.search(r"hoy\s*:?\s*(\d{1,2}/\d{1,2}/\d{4})", blob, re.I)
+    hoy_dia = None
+    date_re = r"(\d{1,2}/\d{1,2}/\d{4})"
+    m = re.search(r"hoy\s*:?\s*(?:([a-záéíóúñ]+)[,.]?\s+)?" + date_re, blob, re.I)
     if m:
-        hoy = m.group(1)
+        hoy, hoy_dia = m.group(2), (m.group(1) or "").lower() or None
+    else:  # el encabezado puede decir "Fecha: ..." u otra palabra: la primera fecha de las primeras líneas
+        m = re.search(date_re, "\n".join(line_texts[:3]))
+        if m:
+            hoy = m.group(1)
 
     table = parse_table(line_phrases)
     table_ys = set(table.row_y + [table.header_y]) if table else set()
@@ -239,6 +248,8 @@ def build_state(img: Image.Image) -> ScreenState:
                 role = "titulo"
             elif table and any(abs(p.cy - y) <= 6 for y in table_ys):
                 role = "encabezado" if abs(p.cy - table.header_y) <= 6 else "celda"
+            if role == "texto":
+                text = fix_ui_word(text)
             e = Element(eid, text, p.x, p.y, p.x2, p.y2, role)
             elements.append(e)
             if role == "menu":
@@ -263,8 +274,21 @@ def build_state(img: Image.Image) -> ScreenState:
             elements.append(Element(eid, f"campo {e.text}", *box, role="campo"))
 
     return ScreenState(img=img, elements=elements, hidden_text=[w.text for w in hidden], menu=menu, title=title,
-                       fingerprint=fingerprint, version=version, hoy=hoy, table=table, lines=line_texts,
+                       fingerprint=fingerprint, version=version, hoy=hoy, hoy_dia=hoy_dia, table=table, lines=line_texts,
                        view=view, dark=dark)
+
+
+UI_WORDS = ("exportar", "filtrar", "limpiar", "guardar", "siguiente", "entendido")
+
+
+def fix_ui_word(text: str) -> str:
+    """El OCR lee mal algunos botones ('Expgytar', 'Hitrar', 'Guarder'). Con un vocabulario corto, que no choca con estados
+    ni nombres de datos, una palabra suelta muy parecida se corrige: así el modelo y las guardas ven el botón de verdad."""
+    n = norm(text)
+    if " " in n or len(n) < 6 or n in UI_WORDS:
+        return text
+    best = max(UI_WORDS, key=lambda w: difflib.SequenceMatcher(None, n, w).ratio())
+    return best.capitalize() if difflib.SequenceMatcher(None, n, best).ratio() >= 0.74 else text
 
 
 def _is_link(rgb: np.ndarray, L: np.ndarray, e: "Element") -> bool:

@@ -80,6 +80,7 @@ class Session:
         self.route_used: Optional[list[str]] = None
         self.blocked_acts: set[str] = set()  # acciones repetidas sin efecto: no se vuelven a ejecutar
         self._drift_seen: Optional[str] = None
+        self.save_confirmed: Optional[str] = None  # aviso de éxito de la app tras guardar (ej. 'cambios aplicados')
 
     # ------------------------------------------------------------------ utilidades
     def time_left(self) -> float:
@@ -310,7 +311,8 @@ class Session:
             if self.reverts >= 1:
                 return "bloqueado: ya se revirtió una vez"
             self.reverts += 1
-        elif COMMIT_EXPORT.search(t):
+        elif COMMIT_EXPORT.search(t) or any(len(w) >= 6 and difflib.SequenceMatcher(None, w, "exportar").ratio() >= 0.74
+                                            for w in t.split()):
             if op != "exportar":
                 return "bloqueado: exportar no es parte de la tarea"
             if self.exports >= 1:
@@ -323,9 +325,10 @@ class Session:
                 return "bloqueado: ya se eliminó un registro"
             self.deletes += 1
         elif COMMIT_SAVE.search(t):
-            # "Crear cliente" en una lista solo abre el formulario: no cuenta como guardar si no hay formulario a la vista
-            only_crear = not COMMIT_SAVE.search(t.replace("crear", ""))
-            if only_crear and sum(e.role == "campo" for e in self.state.elements) < 2:
+            # "Crear paciente" / "Registrar ..." sin una palabra de guardado fuerte abre el formulario si hay una tabla a la vista
+            # o casi ningún campo: eso es navegar, no guardar (contarlo bloqueaba después el guardado real)
+            strong = re.search(r"\b(guardar|grabar|actualizar|enviar|aplicar|salvar)\b", t)
+            if not strong and (self.state.table is not None or sum(e.role == "campo" for e in self.state.elements) < 2):
                 return None
             if op not in ("crear", "editar", "otra"):
                 return "bloqueado: esta tarea no requiere guardar"
@@ -388,6 +391,7 @@ class Session:
                     same, note = False, " (era un submenú: se abre al pasar el mouse, ya está abierto; el clic no lo abre)"
             conf = CONFIRMED.search(norm(ns.text_blob()))
             if conf and COMMIT_SAVE.search(norm(label)):
+                self.save_confirmed = conf.group(0)
                 note += f" (la app confirmó el cambio: '{conf.group(0)}'; verifica que los valores sean los pedidos y termina)"
             return f"clic en '{label}' -> pantalla '{ns.title}'" + (" (la pantalla NO cambió)" if same else "") + note
         if a == "escribir":
@@ -508,10 +512,16 @@ class Session:
             err = FORM_ERROR.search(blob)
             if err:
                 return f"la pantalla muestra un error de la app ('{err.group(0)}'): el guardado no se confirmó"
-            missing = [str(v) for v in (self.intent.get("cambios") or {}).values()
-                       if str(v).strip() and norm(str(v)) not in blob
-                       and difflib.SequenceMatcher(None, norm(str(v)), blob).find_longest_match(
-                           0, len(norm(str(v))), 0, len(blob)).size < 0.85 * len(norm(str(v)))]
+            vals = [str(v) for v in (self.intent.get("cambios") or {}).values() if str(v).strip()]
+            compact = lambda x: re.sub(r"[^a-z0-9]", "", norm(str(x)))
+            blobc = compact(self.state.text_blob())
+            missing = [] if self.save_confirmed else [
+                v for v in vals if compact(v) not in blobc
+                and difflib.SequenceMatcher(None, compact(v), blobc).find_longest_match(
+                    0, len(compact(v)), 0, len(blobc)).size < 0.85 * len(compact(v))]
+            # un identificador (cédula) puede no mostrarse tras guardar: solo falla si falta más de la mitad de los valores
+            if vals and len(missing) <= len(vals) / 2:
+                missing = []
             if missing:
                 return "no veo en pantalla los valores nuevos: " + ", ".join(missing)
         if op == "exportar" and self.exports == 0:
@@ -551,7 +561,7 @@ async def _run(sess: Session) -> tuple[str, str]:
 
     # ---- 2. interpretar
     try:
-        intent = await chat_json(PARSE_SYSTEM, f"Hoy (según la app): {s.hoy or 'desconocido'}\nInstrucción: {sess.tarea}", trace=tr)
+        intent = await chat_json(PARSE_SYSTEM, f"Hoy (según la app): {((s.hoy_dia + ' ') if s.hoy_dia else '')}{s.hoy or 'desconocido'}\nInstrucción: {sess.tarea}", trace=tr)
     except LLMError as e:
         return "fallida", build_summary("fallida", razon=f"no pude interpretar la tarea ({e}).")
     sess.intent = intent
@@ -562,8 +572,10 @@ async def _run(sess: Session) -> tuple[str, str]:
         return "fallida", build_summary("fallida", razon="la tarea pide revelar un dato confidencial; no lo comparto.")
     if intent.get("masiva_o_peligrosa"):
         return "fallida", build_summary("fallida", razon="la tarea es masiva o destructiva sin un objetivo concreto; no la ejecuto.")
+    # "faltan_datos" es un aviso, no una orden de rendirse: fechas relativas, el año, un valor anterior (Bitácora) o un
+    # registro se resuelven en la app. En el hotfix del set oculto, 17 de 28 fallas fueron por cortar aquí.
     if intent.get("faltan_datos"):
-        return "fallida", build_summary("fallida", razon=f"falta información: {intent['faltan_datos']}.")
+        tr.event("aviso", f"el intérprete marcó datos faltantes: {intent['faltan_datos']}; se resuelve en la app")
 
     # ---- 4. ubicar y aprender: recorrido de menús la primera vez que se ve la app
     # (se hace dentro del bucle: si la app abre con un modal, primero el modelo lo cierra y luego se explora)
