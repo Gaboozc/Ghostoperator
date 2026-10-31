@@ -14,6 +14,8 @@ import re
 import time
 from typing import Optional
 
+import numpy as np
+
 from . import config
 from .llm import PARSE_SYSTEM, STEP_SYSTEM, LLMError, chat_json
 from .memory import Memory
@@ -31,6 +33,8 @@ COMMIT_REVERT = re.compile(r"\b(revertir|deshacer)\b")
 NEXT_PAGE = ("siguiente", "next", ">", "›", "»")
 FORM_ERROR = re.compile(r"\b(invalido|invalida|error|obligatorio|obligatoria|requerido|requerida|no se pudo|"
                         r"revise el formulario|ya existe|duplicado)\b")
+CONFIRMED = re.compile(r"\b(cambios aplicados|aplicado|aplicados|guardado|guardados|actualizado|actualizados|creado|"
+                       r"registrado|exito|exitosamente|correctamente)\b")
 UNSAFE_MENU = re.compile(r"\b(salir|cerrar|logout|log out|desconectar|sincronizar|eliminar|borrar|exportar|reiniciar)\b")
 SECRET_VALUE = re.compile(r"(clave|contrase[ñn]a|token|api\s*key|secreto)[^:]{0,40}:\s*([A-Za-z0-9][\w\-\.]{5,})", re.I)
 
@@ -139,7 +143,20 @@ class Session:
         for i, name in enumerate(route):
             last = i == len(route) - 1
             target = s.find(name, role="menu") if i == 0 else None
+            if i == 0 and len(route) > 1 and target:
+                nxt = s.find(route[1], exact=True)  # ¿el desplegable de este menú ya está abierto? Un clic más lo cerraría
+                if (nxt and nxt.role not in ("menu", "titulo", "encabezado") and target.y2 <= nxt.y <= target.y2 + 260
+                        and target.x - 15 <= nxt.x <= target.x + 320):
+                    continue
             target = target or s.find(name, exact=True) or s.find(name)
+            if not target and i == 1:
+                # el clic en el menú pudo haber cerrado un desplegable que ya estaba abierto: se pulsa otra vez para reabrirlo
+                top = s.find(route[0], role="menu")
+                if top:
+                    await self.vnc.click(top.cx, top.cy)
+                    self.trace.actions += 1
+                    s = await self.look("menu")
+                    target = s.find(name, exact=True) or s.find(name)
             if not target:
                 await self.vnc.key("escape")
                 return False, f"no encontré '{name}' en el menú (ruta {' > '.join(route)})"
@@ -327,7 +344,16 @@ class Session:
             before = s.text_blob()
             ns = await self.look()
             same = difflib.SequenceMatcher(None, before, ns.text_blob()).ratio() > 0.98
-            return f"clic en '{label}' -> pantalla '{ns.title}'" + (" (la pantalla NO cambió)" if same else "")
+            note = ""
+            if same:  # los submenús (Ventas ▸) se abren con el mouse encima, no con clic
+                await self.vnc.move(x, y)
+                ns = await self.look("hover")
+                if difflib.SequenceMatcher(None, before, ns.text_blob()).ratio() <= 0.98:
+                    same, note = False, " (era un submenú: se abre al pasar el mouse, ya está abierto; el clic no lo abre)"
+            conf = CONFIRMED.search(norm(ns.text_blob()))
+            if conf and COMMIT_SAVE.search(norm(label)):
+                note += f" (la app confirmó el cambio: '{conf.group(0)}'; verifica que los valores sean los pedidos y termina)"
+            return f"clic en '{label}' -> pantalla '{ns.title}'" + (" (la pantalla NO cambió)" if same else "") + note
         if a == "escribir":
             e = self.el(act.get("id"))
             text = str(act.get("texto", ""))
@@ -345,14 +371,17 @@ class Session:
                 x, y = target.cx, target.cy
             else:  # N es la etiqueta o el valor que ya está dentro del campo
                 x, y = s.input_point(e)
+            zone = (max(0, x - 90), max(0, y - 12), min(s.img.width, x + 90), min(s.img.height, y + 12))
+            before_zone = np.asarray(s.img.convert("L").crop(zone), dtype=np.int16)
             await self.vnc.replace_field(x, y, text)
             self.trace.actions += 1
             label = target.text.removeprefix("campo ")
             self.flow_steps.append({"accion": "escribir", "campo": label, "texto": self._slot(text)})
             ns = await self.look()
-            seen = not text or any(abs(o.cy - y) < 14 and difflib.SequenceMatcher(None, norm(o.text), norm(text)).ratio() > 0.8
-                                   for o in ns.elements)
-            return f"escribí '{text}' en '{label}'" + ("" if seen else " (no veo el valor en esa fila: puede que el clic no cayera en el campo)")
+            after_zone = np.asarray(ns.img.convert("L").crop(zone), dtype=np.int16)
+            # el OCR no lee bien el texto dentro de los campos pequeños: se compara la zona del clic antes y después
+            changed = before_zone.shape == after_zone.shape and float(np.abs(before_zone - after_zone).mean()) > 1.5
+            return f"escribí '{text}' en '{label}'" + ("" if changed or not text else " (sin cambios visibles en esa zona; mira la captura)")
         if a == "seleccionar":
             e = self.el(act.get("id"))
             opt = str(act.get("opcion", ""))
@@ -562,7 +591,8 @@ async def _run(sess: Session) -> tuple[str, str]:
         if not act.get("accion"):
             act["accion"] = "leer_tabla" if ("columna" in act or "filtros" in act) else None
         if json.dumps({k: v for k, v in act.items() if k != "por_que"}, sort_keys=True) in sess.blocked_acts:
-            result = "bloqueado: esta misma acción ya se repitió sin efecto; elige otra (clic_xy sobre la captura)"
+            result = ("bloqueado: esta misma acción ya se repitió sin efecto; elige otra. Para cambiar de pantalla usa navegar "
+                  "con la ruta completa del menú; si es un botón, clic_xy sobre la captura")
         elif act.get("accion"):
             result = await sess.execute(act)
         else:

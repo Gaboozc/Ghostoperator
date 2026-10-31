@@ -156,7 +156,10 @@ REGLAS (obligatorias):
     La app puede haber cambiado de tema: los botones y etiquetas pueden tener otro nombre o lugar; búscalos por su sentido.
 16. Los nombres de los botones pueden cambiar (Buscar -> Filtrar, Guardar -> Aplicar, la barra de acciones a la derecha) y el
     OCR a veces los lee mal (ej. "Hitrar" por "Filtrar"): guíate por la captura y por la función del botón.
+    Los menús con flecha (Ventas ▸) abren su submenú al pasar el mouse, no con clic: para ir a una pantalla usa SIEMPRE
+    "navegar" con la ruta completa del menú (ej. ["Comercial","Ventas","Pedidos"]).
     En la versión 4.2 el formulario NO se cierra al aplicar: tras pulsar Aplicar/Guardar no lo pulses otra vez; comprueba que
-    los valores quedaron (mensaje de confirmación o reabriendo el registro) y termina. Si aparece un error, corrígelo o falla."""
+    los valores quedaron: si la app muestra un mensaje de éxito (ej. "Cambios aplicados") y no hay error, termina de inmediato; si
+    no hay mensaje, reabre el registro UNA vez. Si aparece un error, corrígelo o falla."""
 
 MODAL_HINT = "Hay una ventana emergente o mensaje nuevo en pantalla; léelo antes de seguir."

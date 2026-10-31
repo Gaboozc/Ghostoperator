@@ -116,7 +116,7 @@ def run_tesseract(img: Image.Image) -> list[Word]:
 
     def _parse(out: str, scale: float) -> list[Word]:
         found: list[Word] = []
-        for row in csv.DictReader(io.StringIO(out), delimiter="	", quoting=csv.QUOTE_NONE):
+        for row in csv.DictReader(io.StringIO(out), delimiter="\t", quoting=csv.QUOTE_NONE):
             t = (row.get("text") or "").strip()
             try:
                 conf = float(row.get("conf") or -1)
