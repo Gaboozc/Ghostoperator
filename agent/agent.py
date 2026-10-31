@@ -29,6 +29,7 @@ COMMIT_EXPORT = re.compile(r"\b(exportar|descargar|generar reporte)\b")
 COMMIT_DELETE = re.compile(r"\b(eliminar|borrar|anular)\b")
 COMMIT_REVERT = re.compile(r"\b(revertir|deshacer)\b")
 NEXT_PAGE = ("siguiente", "next", ">", "›", "»")
+UNSAFE_MENU = re.compile(r"\b(salir|cerrar|logout|log out|desconectar|sincronizar|eliminar|borrar|exportar|reiniciar)\b")
 SECRET_VALUE = re.compile(r"(clave|contrase[ñn]a|token|api\s*key|secreto)[^:]{0,40}:\s*([A-Za-z0-9][\w\-\.]{5,})", re.I)
 
 
@@ -127,6 +128,8 @@ class Session:
         for top in list(base.menu):
             if time.time() > t_end or self.time_left() < 120:
                 break
+            if UNSAFE_MENU.search(norm(top.text)):  # una entrada directa así cierra sesión o cambia estado
+                continue
             await self.vnc.click(top.cx, top.cy)
             s1 = await self.look("explorar")
             before = {norm(e.text) for e in base.elements}
