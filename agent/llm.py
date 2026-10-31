@@ -117,11 +117,12 @@ Devuelve SOLO un JSON con UNA acción:
 {"accion":"clic","id":N}                                          // clic en el elemento N
 {"accion":"clic_xy","x":X,"y":Y}                                  // solo si el elemento no está en la lista (coordenadas de la captura)
 {"accion":"escribir","id":N,"texto":"..."}                        // N = campo (rol campo) o su etiqueta; reemplaza el contenido
-{"accion":"seleccionar","id":N,"opcion":"..."}                    // lista desplegable: N = la lista o su etiqueta
+{"accion":"seleccionar","id":N,"opcion":"..."}                    // lista desplegable: N = la lista o su etiqueta; abre y elige en un solo paso
+                                                                  // (no hagas "clic" para abrir listas desplegables)
 {"accion":"tecla","tecla":"enter|tab|escape|pagedown"}
 {"accion":"desplazar","direccion":"abajo|arriba"}
-{"accion":"leer_tabla","columna":"Cliente","valor":"Ferretería Ruiz"}  // lee TODAS las páginas de la tabla visible y cuenta en código;
-                                                                  // columna/valor opcionales: cuenta filas cuyo valor coincide exacto
+{"accion":"leer_tabla","filtros":{"Cliente":"Ferretería Ruiz","Estado":"Vencida"}}  // lee TODAS las páginas de la tabla visible
+                                                                  // y cuenta en código las filas que cumplen TODOS los filtros (columna: valor)
 {"accion":"terminar","estado":"terminada|fallida","respuesta":["dato1","dato2"] o null,"hecho":"qué hiciste","razon":"por qué falló (nombra los datos concretos)","reglas":["regla aprendida de la app"]}
 Incluye siempre "por_que": una frase corta.
 
@@ -137,7 +138,9 @@ REGLAS (obligatorias):
    Si no se confirman, no repitas a ciegas: revisa y termina fallida explicando.
 8. Si aparece una ventana emergente: léela. Si es confirmación o pide un motivo/nota, complétala con texto neutral derivado de la tarea
    (ej. "Corrección de dirección solicitada") y continúa. Si bloquea por una regla de negocio, cancélala y termina fallida explicando.
-9. Para contar o preguntas sobre listas: usa los filtros de la app y luego "leer_tabla" (no cuentes a ojo).
+9. Para contar o preguntas sobre listas: pon los filtros de la app y pulsa Buscar UNA vez; luego "leer_tabla" con TODOS los criterios
+   de la pregunta en "filtros" (aunque la app ya filtre: así se cuenta bien aunque el filtro no se haya aplicado). No cuentes a ojo.
+   Usa el número "filas_que_coinciden" como respuesta; no repitas leer_tabla con los mismos filtros.
 10. Para exportar: pon exactamente los filtros pedidos (estado, fechas dd/mm/aaaa), pulsa Buscar, revisa y luego Exportar una sola vez.
 11. "respuesta" solo en preguntas: los valores en el orden pedido; números sin texto extra (ej. ["45"]). Si no se puede responder, null y estado fallida.
 12. Escribe los valores exactamente como los da la tarea (respeta tildes y mayúsculas)."""

@@ -150,7 +150,20 @@ class Session:
             self.trace.event("aprendizaje", f"mapa de menús: {len(paths)} rutas", data={"rutas": paths})
 
     # ------------------------------------------------------------------ leer tabla en todas las páginas
-    async def read_all_pages(self, column: Optional[str], value: Optional[str]) -> dict:
+    def _next_button(self, s: ScreenState) -> Optional[tuple[int, int]]:
+        """Botón de página siguiente. El OCR puede pegarlo a 'Página 1': entonces se apunta a su parte derecha."""
+        for e in s.elements:
+            t = norm(e.text)
+            if t in NEXT_PAGE or t.startswith("siguiente"):
+                return e.cx, e.cy
+        for e in s.elements:
+            t = norm(e.text)
+            if t.endswith("siguiente") and e.y > (s.table.header_y if s.table else 0):
+                cw = (e.x2 - e.x) / max(1, len(e.text))
+                return int(e.x2 - cw * len("siguiente") / 2), e.cy
+        return None
+
+    async def read_all_pages(self, filtros: dict) -> dict:
         all_rows: list[dict] = []
         prev_key = None
         pages = 0
@@ -165,20 +178,22 @@ class Session:
             prev_key = key
             all_rows.extend(rows)
             pages += 1
-            nxt = next((e for e in s.elements if norm(e.text) in NEXT_PAGE or norm(e.text).startswith("siguiente")), None)
+            nxt = self._next_button(s)
             if not nxt:
                 break
-            await self.vnc.click(nxt.cx, nxt.cy)
+            await self.vnc.click(*nxt)
             self.trace.actions += 1
             await self.look("pagina")
         cols = list(all_rows[0].keys()) if all_rows else []
         matched = all_rows
-        if column and value and all_rows:
+        for column, value in (filtros or {}).items():
+            if not (cols and str(value).strip()):
+                continue
             col = max(cols, key=lambda c: difflib.SequenceMatcher(None, norm(c), norm(column)).ratio())
-            target = norm(value)
-            matched = [r for r in all_rows if difflib.SequenceMatcher(None, norm(r.get(col, "")), target).ratio() >= 0.9]
+            target = norm(str(value))
+            matched = [r for r in matched if difflib.SequenceMatcher(None, norm(r.get(col, "")), target).ratio() >= 0.9]
         res = {"paginas": pages, "filas_total": len(all_rows), "filas_que_coinciden": len(matched),
-               "columnas": cols, "muestra": matched[:12]}
+               "filtros": filtros, "columnas": cols, "muestra": matched[:12]}
         self.last_table = res
         self.trace.event("tabla", f"{len(all_rows)} filas en {pages} páginas; coinciden {len(matched)}",
                          data={k: v for k, v in res.items() if k != "muestra"})
@@ -240,7 +255,8 @@ class Session:
             if a == "clic":
                 e = self.el(act.get("id"))
                 if not e:
-                    return "id inexistente en la pantalla actual"
+                    return (f"id {act.get('id')} inexistente en la pantalla actual (ids válidos: 1..{len(s.elements)}); "
+                            "usa un id de la lista de elementos")
                 x, y, label = e.cx, e.cy, e.text
             else:
                 x, y = int(act.get("x", 0)), int(act.get("y", 0))
@@ -280,16 +296,27 @@ class Session:
             if not e:
                 return "id inexistente"
             target = e if e.role == "campo" else (s.field_for(e.text) or e)
-            x, y = (target.cx, target.cy) if target.role == "campo" else (e.cx, e.y2 + 12)
-            await self.vnc.click(x, y)
-            await asyncio.sleep(0.4)
-            await self.vnc.type_text(opt)
-            await asyncio.sleep(0.2)
-            await self.vnc.key("enter")
+            if target is e and e.role != "campo":
+                # los <select> no son cajas blancas: si N es la etiqueta, el control es el texto justo debajo
+                # (muestra la opción actual); si no hay nada debajo, N ya es el control
+                below = [b for b in s.elements if b is not e and 0 < b.y - e.y2 < 25 and abs(b.x - e.x) < 30]
+                target = below[0] if below else e
+            x, y = target.cx, target.cy
+            await self.vnc.click(x, y)  # abre la lista nativa
             self.trace.actions += 1
-            self.flow_steps.append({"accion": "seleccionar", "campo": target.text.removeprefix("campo "), "opcion": self._slot(opt)})
-            await self.look()
-            return f"seleccioné '{opt}'"
+            ls = await self.look("lista")
+            # la lista abierta muestra las opciones como texto bajo el control: clic en la opción exacta
+            opts = [o for o in ls.elements if norm(o.text) == norm(opt) and o.y > y and o.y < y + 400 and abs(o.x - x) < 250]
+            if opts:
+                await self.vnc.click(opts[0].cx, opts[0].cy)
+            else:  # sin opción visible: escribir la opción y Enter
+                await self.vnc.type_text(opt)
+                await asyncio.sleep(0.2)
+                await self.vnc.key("enter")
+            self.flow_steps.append({"accion": "seleccionar", "campo": e.text.removeprefix("campo "), "opcion": self._slot(opt)})
+            ns = await self.look()
+            ok = any(norm(opt) in norm(o.text) and abs(o.cy - y) < 15 for o in ns.elements)
+            return f"seleccioné '{opt}'" + ("" if ok else " (no confirmo que el control muestre la opción; revisa la captura)")
         if a == "tecla":
             k = str(act.get("tecla", "enter"))
             await self.vnc.key(k)
@@ -302,8 +329,11 @@ class Session:
             await self.look()
             return "desplacé"
         if a == "leer_tabla":
-            res = await self.read_all_pages(act.get("columna"), act.get("valor"))
-            self.flow_steps.append({"accion": "leer_tabla", "columna": act.get("columna")})
+            filtros = dict(act.get("filtros") or {})
+            if act.get("columna") and act.get("valor"):
+                filtros[str(act["columna"])] = act["valor"]
+            res = await self.read_all_pages(filtros)
+            self.flow_steps.append({"accion": "leer_tabla", "filtros": list(filtros)})
             return "resultado de la tabla: " + json.dumps(res, ensure_ascii=False)[:2500]
         return f"acción desconocida: {a}"
 
@@ -437,7 +467,10 @@ async def _run(sess: Session) -> tuple[str, str]:
             resp = [str(v) for v in resp] if isinstance(resp, list) else ([str(resp)] if resp else None)
             return estado, build_summary(estado, respuesta=resp, hecho=act.get("hecho", ""), razon=act.get("razon", ""))
 
-        result = await sess.execute(act)
+        if not act.get("accion"):
+            act["accion"] = "leer_tabla" if ("columna" in act or "filtros" in act) else None
+        result = await sess.execute(act) if act.get("accion") else "falta 'accion' en el JSON; devuelve una acción válida"
+        tr.event("resultado", result[:300])
         sess.log(f"{act.get('accion')} {json.dumps({k: v for k, v in act.items() if k not in ('accion', 'por_que')}, ensure_ascii=False)} -> {result}")
 
     mem.fail_flow(key)

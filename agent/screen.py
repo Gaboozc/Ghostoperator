@@ -117,9 +117,10 @@ class ScreenState:
         out = [f"Pantalla: {self.title or '(sin título)'} | Hoy (según la app): {self.hoy or 'desconocido'}"]
         if self.menu:
             out.append("Menú superior: " + " | ".join(f"[{m.id}] {m.text}" for m in self.menu))
-        for e in self.elements[:max_elems]:
-            if e.role == "menu":
-                continue
+        # primero controles, etiquetas y campos (los campos se numeran al final); las celdas, hasta el tope
+        others = [e for e in self.elements if e.role not in ("menu", "celda")]
+        cells = [e for e in self.elements if e.role == "celda"]
+        for e in sorted(others, key=lambda e: (e.y, e.x)) + cells[:max(0, max_elems - len(others))]:
             out.append(f"[{e.id}] ({e.role}) {e.text}")
         if self.table:
             out.append(f"Tabla visible: columnas={self.table.columns}, filas visibles={len(self.table.rows)}")
