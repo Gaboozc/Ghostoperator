@@ -96,7 +96,7 @@ def run_case(case: dict) -> dict:
 
 def main() -> None:
     wanted = set(sys.argv[1:])
-    cases = [json.loads(p.read_text()) for p in sorted(CASES.glob("*.json"))]
+    cases = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(CASES.glob("*.json"))]
     cases = [c for c in cases if not wanted or c["id"] in wanted]
     results = []
     for c in cases:
@@ -116,7 +116,7 @@ def main() -> None:
     for r in results:
         print(f"  {'OK ' if r['ok'] else 'X  '} {r['id']:<4} {r['estado']:<10} {r.get('dur_s', 0):>6} s  {'; '.join(r.get('errores') or [])}")
     out = Path(__file__).parent / f"results-{time.strftime('%H%M%S')}.json"
-    out.write_text(json.dumps(results, ensure_ascii=False, indent=1))
+    out.write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"detalle: {out}")
 
 
