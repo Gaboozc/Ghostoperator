@@ -114,7 +114,7 @@ Recibes: la tarea, su interpretación, lo que ya sabes de esta app (memoria), lo
 
 Devuelve SOLO un JSON con UNA acción:
 {"accion":"navegar","ruta":["Menú","Submenú","Pantalla"]}       // usa rutas de la memoria o del menú visible
-{"accion":"clic","id":N}                                          // clic en el elemento N
+{"accion":"clic","id":N,"texto":"Buscar"}                         // clic en el elemento N; "texto" = su texto visible (respaldo)
 {"accion":"clic_xy","x":X,"y":Y}                                  // solo si el elemento no está en la lista (coordenadas de la captura)
 {"accion":"escribir","id":N,"texto":"..."}                        // N = campo (rol campo) o su etiqueta; reemplaza el contenido
 {"accion":"seleccionar","id":N,"opcion":"..."}                    // lista desplegable: N = la lista o su etiqueta; abre y elige en un solo paso

@@ -258,6 +258,8 @@ class Session:
         if a in ("clic", "clic_xy"):
             if a == "clic":
                 e = self.el(act.get("id"))
+                if not e and act.get("texto"):  # respaldo: clic por el texto visible del elemento
+                    e = s.find(str(act["texto"]), exact=True) or s.find(str(act["texto"]))
                 if not e:
                     return (f"id {act.get('id')} inexistente en la pantalla actual (ids válidos: 1..{len(s.elements)}); "
                             "usa un id de la lista de elementos")
@@ -268,7 +270,7 @@ class Session:
                 if not e:  # sin texto bajo el clic: el más cercano, para que las guardas sigan aplicando
                     near = [el for el in s.elements if el.role != "campo"]
                     e = min(near, key=lambda el: (el.cx - x) ** 2 + (el.cy - y) ** 2, default=None)
-                    if e and (e.cx - x) ** 2 + (e.cy - y) ** 2 > 60 ** 2:
+                    if e and (e.cx - x) ** 2 + (e.cy - y) ** 2 > 15 ** 2:
                         e = None
                 label = e.text if e else f"({x},{y})"
             blocked = self.guard(label)
@@ -476,7 +478,12 @@ async def _run(sess: Session) -> tuple[str, str]:
             act["accion"] = "leer_tabla" if ("columna" in act or "filtros" in act) else None
         result = await sess.execute(act) if act.get("accion") else "falta 'accion' en el JSON; devuelve una acción válida"
         tr.event("resultado", result[:300])
-        sess.log(f"{act.get('accion')} {json.dumps({k: v for k, v in act.items() if k not in ('accion', 'por_que')}, ensure_ascii=False)} -> {result}")
+        step = f"{act.get('accion')} {json.dumps({k: v for k, v in act.items() if k not in ('accion', 'por_que')}, ensure_ascii=False)} -> {result}"
+        if sess.history and sess.history[-1].split(". ", 1)[-1].startswith(step[:120]) and (
+                "inexistente" in result or "bloqueado" in result):
+            step += (" || REPETISTE la misma acción fallida: cambia de estrategia (clic_xy con coordenadas de la captura,"
+                     " o clic con \"texto\" del botón, u otra vía)")
+        sess.log(step)
 
     mem.fail_flow(key)
     mem.save()
