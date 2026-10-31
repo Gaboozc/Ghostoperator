@@ -134,6 +134,21 @@ async def trace_file(task_id: str, name: str, token: str = Query(default="")):
     return FileResponse(p)
 
 
+@app.get("/runs")
+async def runs(limit: int = Query(default=200, le=1000), _: None = Depends(auth)):
+    """Lista de tareas recibidas (más recientes primero): estado, duración y resumen. Solo lectura, para el debrief."""
+    items = sorted(TASKS.values(), key=lambda t: t.get("creada", 0), reverse=True)[:limit]
+    out = []
+    for t in items:
+        done = t.get("terminada")
+        out.append({
+            "task_id": t.get("task_id"), "estado": t.get("estado"),
+            "duracion_s": round(done - t["creada"], 1) if done and t.get("creada") else None,
+            "tarea": (t.get("tarea") or "")[:200], "resumen": (t.get("resumen") or "")[:400],
+        })
+    return JSONResponse({"total": len(TASKS), "en_curso": sum(1 for t in TASKS.values() if t.get("estado") == "en_curso"), "tareas": out})
+
+
 @app.get("/memory")
 async def memory_view(_: None = Depends(auth)):
     """Lo que el agente ha aprendido de cada app (mapa, flujos, reglas, incidentes)."""
