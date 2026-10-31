@@ -32,6 +32,12 @@ NEXT_PAGE = ("siguiente", "next", ">", "›", "»")
 SECRET_VALUE = re.compile(r"(clave|contrase[ñn]a|token|api\s*key|secreto)[^:]{0,40}:\s*([A-Za-z0-9][\w\-\.]{5,})", re.I)
 
 
+def _menu_like(text: str) -> bool:
+    """Una opción de menú es corta y no es una frase (el texto de fondo de la pantalla no cuenta)."""
+    t = text.rstrip(" >»▸►").strip()
+    return 1 < len(t) and len(t.split()) <= 4 and not t.endswith(".") and t[0].isalpha()
+
+
 class Session:
     def __init__(self, tarea: str, vnc: RFBClient, trace: Trace, cancel: asyncio.Event):
         self.tarea = tarea
@@ -125,7 +131,7 @@ class Session:
             s1 = await self.look("explorar")
             before = {norm(e.text) for e in base.elements}
             items = [e for e in s1.elements if e.role != "menu" and e.y > top.y2 - 2 and e.y < top.y2 + 260
-                     and top.x - 15 <= e.x <= top.x + 320 and norm(e.text) not in before and len(e.text) > 1]
+                     and top.x - 15 <= e.x <= top.x + 320 and norm(e.text) not in before and _menu_like(e.text)]
             for it in items:
                 if time.time() > t_end:
                     break
@@ -133,7 +139,7 @@ class Session:
                 s2 = await self.look("explorar")
                 seen = {norm(e.text) for e in s1.elements}
                 kids = [e for e in s2.elements if e.x > it.x2 - 10 and it.y - 12 <= e.y <= it.y + 260
-                        and norm(e.text) not in seen and e.role != "menu" and len(e.text) > 1]
+                        and norm(e.text) not in seen and e.role != "menu" and _menu_like(e.text)]
                 label = it.text.rstrip(" >»▸►").strip()
                 if kids:
                     for k in kids:
