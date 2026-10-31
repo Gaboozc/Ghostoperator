@@ -208,6 +208,10 @@ class Session:
                 return "bloqueado: ya se eliminó un registro"
             self.deletes += 1
         elif COMMIT_SAVE.search(t):
+            # "Crear cliente" en una lista solo abre el formulario: no cuenta como guardar si no hay formulario a la vista
+            only_crear = not COMMIT_SAVE.search(t.replace("crear", ""))
+            if only_crear and sum(e.role == "campo" for e in self.state.elements) < 2:
+                return None
             if op not in ("crear", "editar", "otra"):
                 return "bloqueado: esta tarea no requiere guardar"
             still_in_form = self.last_save_button and self.state.find(self.last_save_button, exact=True)
@@ -241,6 +245,11 @@ class Session:
             else:
                 x, y = int(act.get("x", 0)), int(act.get("y", 0))
                 e = next((el for el in s.elements if el.x - 3 <= x <= el.x2 + 3 and el.y - 3 <= y <= el.y2 + 3), None)
+                if not e:  # sin texto bajo el clic: el más cercano, para que las guardas sigan aplicando
+                    near = [el for el in s.elements if el.role != "campo"]
+                    e = min(near, key=lambda el: (el.cx - x) ** 2 + (el.cy - y) ** 2, default=None)
+                    if e and (e.cx - x) ** 2 + (e.cy - y) ** 2 > 60 ** 2:
+                        e = None
                 label = e.text if e else f"({x},{y})"
             blocked = self.guard(label)
             if blocked:
