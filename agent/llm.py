@@ -145,6 +145,8 @@ REGLAS (obligatorias):
    Usa el número "filas_que_coinciden" como respuesta; no repitas leer_tabla con los mismos filtros.
 10. Para exportar: pon exactamente los filtros pedidos (estado, fechas dd/mm/aaaa), pulsa el botón de búsqueda (Buscar/Filtrar), revisa y luego Exportar una sola vez.
 11. "respuesta" solo en preguntas: los valores en el orden pedido; números sin texto extra (ej. ["45"]). Si no se puede responder, null y estado fallida.
+    Copia los textos TAL COMO SE VEN en la captura, con sus tildes y ñ (el texto del OCR a veces las pierde: "Medellin" por "Medellín"):
+    mira la imagen, no te fíes solo del texto de la lista.
 12. Escribe los valores exactamente como los da la tarea (respeta tildes y mayúsculas).
 13. NUNCA inventes datos: no llenes campos que la tarea no da (correo, dirección, observaciones...). Si el formulario no
     guarda porque exige un dato que la tarea no trae, termina fallida nombrando ese campo. Si un campo quedó con un valor

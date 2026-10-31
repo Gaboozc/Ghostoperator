@@ -64,10 +64,10 @@ Imprime aprobados, **falsos éxitos** (meta 0) y p95 de tiempo, y guarda el deta
 |---|---|
 | `agent/api.py` | Contrato: `/health`, `POST /tasks` (< 200 ms), `GET /tasks/{id}`; 1 tarea por escritorio (la nueva cancela la anterior); watchdog a 285 s; redacción de secretos |
 | `agent/rfb.py` | Cliente VNC/RFB propio sobre websocket: auth DES, framebuffer Raw/CopyRect, clic con 150 ms de pulsación, teclas Unicode, `Ctrl+A` antes de escribir, captura estable (2 frames iguales) |
-| `agent/ocr.py` | OCR local con Tesseract (2 pasadas en paralelo: texto oscuro y texto claro sobre color) y filtro de contraste contra texto oculto |
-| `agent/screen.py` | Pantalla estructurada: elementos numerados, campos junto a su etiqueta, menú, título, huella y versión de la app, fecha "Hoy", tabla principal; conteo de filas por píxeles + lectura fila por fila |
+| `agent/ocr.py` | OCR local con Tesseract (3 pasadas en paralelo: texto oscuro, texto claro sobre color y una a escala 2 que solo rellena huecos) y filtro de contraste contra texto oculto |
+| `agent/screen.py` | Pantalla estructurada: elementos numerados, enlaces (texto azul), campos junto a su etiqueta, punto de clic para escribir dentro de la caja, menú, título, huella y versión de la app, fecha "Hoy", tabla principal; conteo de filas por píxeles + lectura fila por fila; tema oscuro se percibe sobre la imagen invertida |
 | `agent/memory.py` | Memoria por huella de app: rutas de menú, pantallas, flujos probados con parámetros, reglas descubiertas, incidentes |
-| `agent/agent.py` | Orquestador por fases; recorrido de menús de solo lectura en la primera tarea; guardas de acciones que cambian datos; verificación antes de `terminada` |
+| `agent/agent.py` | Orquestador por fases; recorrido de menús de solo lectura en la primera tarea; guardas de acciones que cambian datos; verificación antes de `terminada` (sin errores de la app visibles, valores a la vista, tabla leída completa) |
 | `agent/llm.py` | Llamadas al modelo vía OpenRouter y prompts (interpretar tarea; elegir siguiente acción) |
 | `agent/report.py` | Resumen por plantilla: `respuesta: <valor>` (número primero, `;` para dos datos), sin secretos |
 | `agent/canary.py` | Detector de deriva: compara versión y menú con la memoria; escribe `data/incident_log.json` |
@@ -89,6 +89,28 @@ Imprime aprobados, **falsos éxitos** (meta 0) y p95 de tiempo, y guarda el deta
 - Al empezar cada tarea se compara la versión de la app con la memoria; si cambió, se registra el incidente y se re-explora el mapa.
 - Si una ruta conocida deja de funcionar, se marca, se registra el incidente y el modelo explora; al resolver la tarea se anota qué se re-aprendió.
 - La canaria revisa cada 5 min y deja `data/incident_log.json` con causa y hora.
+
+### Incidente FR-0153: la app pasó de v3.9 a v4.2
+
+Lo observado en el escritorio de pruebas (31/10/2026): al abrir aparece el modal **"Novedades de la versión 4.2"** (botón
+*Entendido*), el tema pasa a verde, el filtro se llama **Filtrar** (antes *Buscar*), la barra de acciones (*Exportar*, *Crear
+pedido*) pasa a la derecha y los formularios **se aplican sin cerrarse** (aviso *Cambios aplicados*). El cambio llegó a mitad de una
+tarea (E4), no al inicio.
+
+| Qué falló con la v4.2 | Causa medida | Qué cambió en el agente |
+|---|---|---|
+| E4: 25 clics en "Ventas" sin abrir el submenú | los submenús se abren con el mouse encima, no con clic | un clic sin efecto se repite como *hover*; `navegar` reabre el menú si el clic lo cerró |
+| "Exportar" y "Crear pedido" no aparecían | Tesseract en modo disperso se los saltaba a escala 3 | tercera pasada a escala 2 como relleno de huecos; `clic_xy` lee el texto del botón en un recorte para que las guardas sigan aplicando |
+| E2: ~100 s escribiendo en un campo | el clic caía 12 px fuera de la caja cuando N era el valor ya escrito | `input_point`: clic dentro de la caja tanto si N es la etiqueta como el valor |
+| E2: ~110 s reabriendo el registro tras aplicar | el formulario ya no se cierra | se reconoce el aviso "Cambios aplicados" y el agente termina; un segundo guardado solo con un error visible |
+| E3: respondió 12 en vez de 45 (falso éxito) | el OCR del servidor no halló "Siguiente" y la tabla se leyó a medias | `leer_tabla` informa si fue completa; una consulta sobre una tabla incompleta no puede terminar como respuesta |
+
+Detección: el agente compara la versión leída con la de su memoria en cada captura (dos lecturas seguidas para descartar un
+error de OCR), registra el incidente en `data/memory/<app>.json` (visible en `GET /memory`, con causa y qué se re-aprendió), emite
+un evento `deriva` en la traza e invalida el mapa de menús.
+
+Resultados contra la v4.2 (arnés `eval/harness.py`, un intento por caso): E2 pasó de fallar a las 260 s a pasar en 125 s; E4 pasó de
+fallar a pasar en 131 s; E3, E5, V6, V11, V12 y V13 pasan; 0 falsos éxitos tras el arreglo de la tabla incompleta.
 
 ## Variables de entorno
 

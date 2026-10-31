@@ -43,6 +43,10 @@ MODAL_BUTTONS = {"aceptar", "cerrar", "entendido", "continuar", "ok", "de acuerd
                  "cancelar", "descartar"}
 
 
+# botones neutros para cerrar un aviso al abrir la app (en orden de preferencia); nunca "no", "descartar" ni "cancelar"
+SAFE_DISMISS = ("entendido", "aceptar", "cerrar", "ok", "de acuerdo", "continuar", "omitir", "mas tarde", "x")
+
+
 def looks_modal(s: ScreenState) -> bool:
     """Hay una ventana emergente encima (botones típicos de diálogo a la vista): no se explora detrás de ella."""
     return sum(norm(e.text) in MODAL_BUTTONS for e in s.elements if e.role != "menu") >= 1
@@ -136,6 +140,23 @@ class Session:
 
     def log(self, text: str) -> None:
         self.history.append(f"{len(self.history) + 1}. {text}")
+
+    async def dismiss_start_modal(self, s: ScreenState) -> ScreenState:
+        """Al abrir la app puede haber un aviso (ej. "Novedades de la versión 4.2") que oscurece el encabezado: sin cerrarlo no se
+        lee la fecha "Hoy" ni la versión, y las tareas con "ayer" o "el sábado" no se pueden resolver. Se cierra por código."""
+        for _ in range(2):
+            if not looks_modal(s):
+                break
+            btn = next((e for name in SAFE_DISMISS for e in s.elements if e.role != "menu" and norm(e.text) == name), None)
+            if btn:
+                await self.vnc.click(btn.cx, btn.cy)
+                self.trace.actions += 1
+            else:
+                await self.vnc.key("escape")
+            await self.vnc.move(self.vnc.width - 5, self.vnc.height - 5)
+            s = await self.look("modal")
+            self.trace.event("aviso", f"aviso inicial cerrado con '{btn.text if btn else 'Escape'}'")
+        return s
 
     # ------------------------------------------------------------------ navegación por menús (anclada a texto)
     async def navigate(self, route: list[str]) -> tuple[bool, str]:
@@ -514,6 +535,8 @@ async def run_task(tarea: str, desktop_url: str, password: str, cancel: asyncio.
 async def _run(sess: Session) -> tuple[str, str]:
     tr = sess.trace
     s = await sess.look("inicio")
+    if looks_modal(s):
+        s = await sess.dismiss_start_modal(s)
 
     # ---- huella de app y memoria (5 apps distintas -> 5 mapas distintos)
     mem = Memory(s.fingerprint)

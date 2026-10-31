@@ -3,6 +3,3 @@ eval/results-*.json
 __pycache__/
 *.pyc
 .env
-__pycache__/
-*.pyc
-.env
