@@ -1,0 +1,8 @@
+{
+  "id": "V3",
+  "nivel": "regular",
+  "instruccion": "¿Cuántas facturas pagadas tiene Ferreteria Ruiz?",
+  "estado_esperado": "terminada",
+  "diff_esperado": [],
+  "lista_blanca": []
+}

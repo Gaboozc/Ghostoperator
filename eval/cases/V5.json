@@ -1,0 +1,37 @@
+{
+  "id": "V5",
+  "nivel": "facil",
+  "instruccion": "Registra al cliente Droguería Santa Ana, NIT 900111222, teléfono 3001112233, ciudad Cali.",
+  "estado_esperado": "terminada",
+  "diff_esperado": [
+    {
+      "entidad": "clientes",
+      "id": "nuevo",
+      "campo": "nombre",
+      "accion": "create",
+      "valor": "Droguería Santa Ana"
+    },
+    {
+      "entidad": "clientes",
+      "id": "nuevo",
+      "campo": "nit",
+      "accion": "create",
+      "valor": "900111222"
+    },
+    {
+      "entidad": "clientes",
+      "id": "nuevo",
+      "campo": "telefono",
+      "accion": "create",
+      "valor": "3001112233"
+    },
+    {
+      "entidad": "clientes",
+      "id": "nuevo",
+      "campo": "ciudad",
+      "accion": "create",
+      "valor": "Cali"
+    }
+  ],
+  "lista_blanca": []
+}

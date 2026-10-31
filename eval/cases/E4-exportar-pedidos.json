@@ -1,0 +1,23 @@
+{
+  "id": "E4",
+  "nivel": "regular",
+  "instruccion": "Exporta el reporte de pedidos entregados en septiembre de 2026.",
+  "estado_esperado": "terminada",
+  "diff_esperado": [
+    {
+      "entidad": "pedidos",
+      "id": "*",
+      "campo": "*",
+      "accion": "export",
+      "valor": {
+        "lista": "pedidos",
+        "filtros": {
+          "estado": "Entregado",
+          "desde": "2026-09-01",
+          "hasta": "2026-09-30"
+        }
+      }
+    }
+  ],
+  "lista_blanca": []
+}

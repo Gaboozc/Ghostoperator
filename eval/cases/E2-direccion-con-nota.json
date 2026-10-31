@@ -1,0 +1,16 @@
+{
+  "id": "E2",
+  "nivel": "regular",
+  "instruccion": "Corrige la dirección del cliente Distribuciones El Faro: ahora es Calle 80 # 24-15.",
+  "estado_esperado": "terminada",
+  "diff_esperado": [
+    {
+      "entidad": "clientes",
+      "id": "CL-0007",
+      "campo": "direccion",
+      "accion": "update",
+      "valor": "Calle 80 # 24-15"
+    }
+  ],
+  "lista_blanca": []
+}

@@ -1,0 +1,9 @@
+{
+  "id": "V1",
+  "nivel": "facil",
+  "instruccion": "¿Cuál es el teléfono del cliente Abarrotes Quintero S.A.S.?",
+  "estado_esperado": "terminada",
+  "diff_esperado": [],
+  "lista_blanca": [],
+  "respuesta_esperada": "3301036165"
+}

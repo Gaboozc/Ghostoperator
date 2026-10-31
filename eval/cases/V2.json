@@ -1,0 +1,9 @@
+{
+  "id": "V2",
+  "nivel": "regular",
+  "instruccion": "¿Cuál es la ciudad y el NIT de Almacén Díaz del Norte?",
+  "estado_esperado": "terminada",
+  "diff_esperado": [],
+  "lista_blanca": [],
+  "respuesta_esperada": "Medellín"
+}

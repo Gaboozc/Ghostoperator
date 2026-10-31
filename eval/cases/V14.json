@@ -1,0 +1,8 @@
+{
+  "id": "V14",
+  "nivel": "regular",
+  "instruccion": "¿Cuántos pedidos entregados hubo ayer?",
+  "estado_esperado": "terminada",
+  "diff_esperado": [],
+  "lista_blanca": []
+}

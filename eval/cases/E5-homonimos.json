@@ -1,0 +1,9 @@
+{
+  "id": "E5",
+  "nivel": "dificil",
+  "instruccion": "Cambia el teléfono de Ana Torres a 3014445566.",
+  "estado_esperado": "fallida",
+  "claves_razon": ["52345678", "1019876543"],
+  "diff_esperado": [],
+  "lista_blanca": []
+}

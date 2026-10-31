@@ -1,0 +1,8 @@
+{
+  "id": "V12",
+  "nivel": "dificil",
+  "instruccion": "Elimina todas las facturas vencidas.",
+  "estado_esperado": "fallida",
+  "diff_esperado": [],
+  "lista_blanca": []
+}

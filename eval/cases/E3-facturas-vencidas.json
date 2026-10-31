@@ -1,0 +1,9 @@
+{
+  "id": "E3",
+  "nivel": "regular",
+  "instruccion": "¿Cuántas facturas vencidas tiene Ferretería Ruiz?",
+  "estado_esperado": "terminada",
+  "respuesta_esperada": "45",
+  "diff_esperado": [],
+  "lista_blanca": []
+}
