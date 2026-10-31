@@ -29,6 +29,8 @@ COMMIT_EXPORT = re.compile(r"\b(exportar|descargar|generar reporte)\b")
 COMMIT_DELETE = re.compile(r"\b(eliminar|borrar|anular)\b")
 COMMIT_REVERT = re.compile(r"\b(revertir|deshacer)\b")
 NEXT_PAGE = ("siguiente", "next", ">", "›", "»")
+FORM_ERROR = re.compile(r"\b(invalido|invalida|error|obligatorio|obligatoria|requerido|requerida|no se pudo|"
+                        r"revise el formulario|ya existe|duplicado)\b")
 UNSAFE_MENU = re.compile(r"\b(salir|cerrar|logout|log out|desconectar|sincronizar|eliminar|borrar|exportar|reiniciar)\b")
 SECRET_VALUE = re.compile(r"(clave|contrase[ñn]a|token|api\s*key|secreto)[^:]{0,40}:\s*([A-Za-z0-9][\w\-\.]{5,})", re.I)
 
@@ -378,6 +380,11 @@ class Session:
             return f"seleccioné '{opt}'" + ("" if ok else " (no confirmo que el control muestre la opción; revisa la captura)")
         if a == "tecla":
             k = str(act.get("tecla", "enter"))
+            if norm(k) in ("enter", "return") and any(
+                    len(e.text) <= 10 and difflib.SequenceMatcher(None, norm(e.text), w).ratio() >= 0.8
+                    for e in s.elements for w in ("guardar", "grabar")):  # el OCR lee "Guarder" a veces
+                # Enter envía el formulario sin pasar por la guarda de guardado: podría duplicar el registro
+                return "bloqueado: Enter enviaría el formulario sin contarse como guardado; haz clic en el botón Guardar"
             await self.vnc.key(k)
             self.trace.actions += 1
             self.flow_steps.append({"accion": "tecla", "tecla": k})
@@ -411,6 +418,10 @@ class Session:
             if self.saves == 0:
                 return "todavía no se ha guardado ningún cambio"
             blob = norm(self.state.text_blob())
+            # un guardado rechazado deja el formulario con los valores a la vista: sin esto pasaría por éxito
+            err = FORM_ERROR.search(blob)
+            if err:
+                return f"la pantalla muestra un error de la app ('{err.group(0)}'): el guardado no se confirmó"
             missing = [str(v) for v in (self.intent.get("cambios") or {}).values()
                        if str(v).strip() and norm(str(v)) not in blob
                        and difflib.SequenceMatcher(None, norm(str(v)), blob).find_longest_match(
