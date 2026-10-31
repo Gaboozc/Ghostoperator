@@ -38,7 +38,7 @@ class Element:
     y: int
     x2: int
     y2: int
-    role: str = "texto"  # texto | menu | celda | campo | encabezado | titulo
+    role: str = "texto"  # texto | menu | celda | campo | encabezado | titulo | enlace
 
     @property
     def cx(self) -> int:
@@ -212,6 +212,12 @@ def build_state(img: Image.Image) -> ScreenState:
             if role == "menu":
                 menu.append(e)
 
+    # enlaces: texto azul (abren la ficha del registro, ej. el código en la tabla)
+    rgb = np.asarray(img.convert("RGB"), dtype=np.int16)
+    for e in elements:
+        if e.role in ("texto", "celda") and _is_link(rgb, L, e):
+            e.role = "enlace"
+
     # campos de formulario: caja blanca bajo (o a la derecha de) una etiqueta corta
     table_top = table.header_y - 10 if table else H
     for e in list(elements):
@@ -224,6 +230,17 @@ def build_state(img: Image.Image) -> ScreenState:
 
     return ScreenState(img=img, elements=elements, hidden_text=[w.text for w in hidden], menu=menu, title=title,
                        fingerprint=fingerprint, version=version, hoy=hoy, table=table, lines=line_texts)
+
+
+def _is_link(rgb: np.ndarray, L: np.ndarray, e: "Element") -> bool:
+    if np.median(L[e.y:e.y2 + 1, e.x:e.x2 + 1]) < 180:  # texto sobre fondo oscuro = botón, no enlace
+        return False
+    patch = rgb[e.y:e.y2 + 1, e.x:e.x2 + 1].reshape(-1, 3)
+    ink = patch[L[e.y:e.y2 + 1, e.x:e.x2 + 1].reshape(-1) < 150]  # píxeles del texto
+    if len(ink) < 8:
+        return False
+    r, g, b = ink.mean(axis=0)
+    return b - r > 60 and b > 120
 
 
 def _split_at_borders(p: Phrase, L: np.ndarray) -> list[Phrase]:

@@ -146,6 +146,8 @@ REGLAS (obligatorias):
 12. Escribe los valores exactamente como los da la tarea (respeta tildes y mayúsculas).
 13. NUNCA inventes datos: no llenes campos que la tarea no da (correo, dirección, observaciones...). Si el formulario no
     guarda porque exige un dato que la tarea no trae, termina fallida nombrando ese campo. Si un campo quedó con un valor
-    que no corresponde (ej. escribiste algo en el campo equivocado), bórralo antes de guardar."""
+    que no corresponde (ej. escribiste algo en el campo equivocado), bórralo antes de guardar.
+14. Para abrir un registro de una tabla, haz clic en su elemento de rol "enlace" (texto azul, normalmente el código).
+    Si un clic deja "la pantalla NO cambió", no lo repitas: prueba otro elemento."""
 
 MODAL_HINT = "Hay una ventana emergente o mensaje nuevo en pantalla; léelo antes de seguir."

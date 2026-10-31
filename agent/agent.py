@@ -289,8 +289,10 @@ class Session:
             await self.vnc.move(self.vnc.width - 5, self.vnc.height - 5)  # que el cursor no tape el texto
             self.trace.actions += 1
             self.flow_steps.append({"accion": "clic", "texto": label})
+            before = s.text_blob()
             ns = await self.look()
-            return f"clic en '{label}' -> pantalla '{ns.title}'"
+            same = difflib.SequenceMatcher(None, before, ns.text_blob()).ratio() > 0.98
+            return f"clic en '{label}' -> pantalla '{ns.title}'" + (" (la pantalla NO cambió)" if same else "")
         if a == "escribir":
             e = self.el(act.get("id"))
             text = str(act.get("texto", ""))
@@ -311,32 +313,41 @@ class Session:
             opt = str(act.get("opcion", ""))
             if not e:
                 return "id inexistente"
-            target = e
+            # N puede ser el desplegable mismo (muestra la opción actual, ej. "(seleccione)") o su etiqueta: se prueba
+            # N, luego el texto justo debajo y luego la caja detectada; solo vale si se ve la lista abierta
+            cands = [e]
             if e.role != "campo":
-                # los <select> no son cajas blancas: si N es la etiqueta, el control es el texto justo debajo
-                # (muestra la opción actual, ej. "(seleccione)"); si no, la caja detectada; si no, N ya es el control
                 below = [b for b in s.elements if b is not e and b.role != "campo" and 0 < b.y - e.y2 < 25
                          and abs(b.x - e.x) < 30]
-                target = below[0] if below else (s.field_for(e.text) or e)
-            x, y = target.cx, target.cy
-            before = {(norm(b.text), b.y // 4) for b in s.elements}
-            await self.vnc.click(x, y)  # abre la lista nativa
-            self.trace.actions += 1
-            ls = await self.look("lista")
-            # la lista abierta muestra opciones nuevas bajo el control: clic en la exacta
-            new = [o for o in ls.elements if (norm(o.text), o.y // 4) not in before and y < o.y < y + 400 and abs(o.x - x) < 300]
-            opts = [o for o in new if norm(o.text) == norm(opt)]
-            if opts:
-                await self.vnc.click(opts[0].cx, opts[0].cy)
-            elif len(new) >= 2:  # la lista está abierta pero la opción no se ve: escribirla salta a ella
+                cands += below[:1] + [f for f in [s.field_for(e.text)] if f]
+            opened = None
+            for target in cands:
+                x, y = target.cx, target.cy
+                before = {(norm(b.text), b.y // 4) for b in self.state.elements}
+                await self.vnc.click(x, y)
+                self.trace.actions += 1
+                ls = await self.look("lista")
+                # lista nativa abierta = opciones nuevas apiladas bajo el control, alineadas con su borde izquierdo
+                new = [o for o in ls.elements if (norm(o.text), o.y // 4) not in before
+                       and target.y2 < o.y < target.y2 + 400 and abs(o.x - target.x) < 25]
+                exact = [o for o in ls.elements if norm(o.text) == norm(opt) and target.y2 < o.y < target.y2 + 400
+                         and abs(o.x - target.x) < 300]
+                if len(new) >= 2 or exact:
+                    opened = (target, exact)
+                    break
+                await self.vnc.key("escape")
+                await self.look()
+            if not opened:  # NO escribir: el foco puede estar en otro campo
+                return (f"no se abrió una lista desplegable con '{e.text}'; no escribí nada. "
+                        "Usa seleccionar con el id del texto que muestra el valor actual del desplegable, o clic_xy sobre él")
+            target, exact = opened
+            if exact:
+                await self.vnc.click(exact[0].cx, exact[0].cy)
+            else:  # la lista está abierta pero la opción no se ve: escribirla salta a ella
                 await self.vnc.type_text(opt)
                 await asyncio.sleep(0.2)
                 await self.vnc.key("enter")
-            else:  # no se abrió ninguna lista: NO escribir (caería en otro campo)
-                await self.vnc.key("escape")
-                await self.look()
-                return (f"no se abrió una lista desplegable en ({x},{y}) ('{target.text}'); no escribí nada. "
-                        "Usa seleccionar con el id del texto que muestra el valor actual del desplegable, o clic_xy sobre él")
+            y = target.cy
             self.flow_steps.append({"accion": "seleccionar", "campo": e.text.removeprefix("campo "), "opcion": self._slot(opt)})
             ns = await self.look()
             ok = any(norm(opt) in norm(o.text) and abs(o.cy - y) < 15 for o in ns.elements)
@@ -497,9 +508,9 @@ async def _run(sess: Session) -> tuple[str, str]:
         tr.event("resultado", result[:300])
         step = f"{act.get('accion')} {json.dumps({k: v for k, v in act.items() if k not in ('accion', 'por_que')}, ensure_ascii=False)} -> {result}"
         if sess.history and sess.history[-1].split(". ", 1)[-1].startswith(step[:120]) and (
-                "inexistente" in result or "bloqueado" in result):
-            step += (" || REPETISTE la misma acción fallida: cambia de estrategia (clic_xy con coordenadas de la captura,"
-                     " o clic con \"texto\" del botón, u otra vía)")
+                "inexistente" in result or "bloqueado" in result or "NO cambió" in result or "no se abrió" in result):
+            step += (" || REPETISTE la misma acción sin efecto: cambia de estrategia (para abrir un registro usa su"
+                     " enlace, rol enlace, ej. el código; o un botón Editar/Ver; o clic_xy en otro punto)")
         sess.log(step)
 
     mem.fail_flow(key)
