@@ -196,15 +196,18 @@ def build_state(img: Image.Image) -> ScreenState:
     eid = 0
     for i, phrases in enumerate(line_phrases):
         for p in phrases:
+            text = p.text.strip("|_[] ").strip()  # bordes de cajas que el OCR lee como '|'
+            if not text:
+                continue
             eid += 1
             role = "texto"
             if i == menu_idx:
                 role = "menu"
-            elif p.text == title:
+            elif text == title:
                 role = "titulo"
             elif table and any(abs(p.cy - y) <= 6 for y in table_ys):
                 role = "encabezado" if abs(p.cy - table.header_y) <= 6 else "celda"
-            e = Element(eid, p.text, p.x, p.y, p.x2, p.y2, role)
+            e = Element(eid, text, p.x, p.y, p.x2, p.y2, role)
             elements.append(e)
             if role == "menu":
                 menu.append(e)

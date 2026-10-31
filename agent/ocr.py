@@ -76,13 +76,27 @@ def _luma(img: Image.Image) -> np.ndarray:
     return 0.299 * a[:, :, 0] + 0.587 * a[:, :, 1] + 0.114 * a[:, :, 2]
 
 
+def _dark_regions_inverted(img: Image.Image, k: int = 9) -> Image.Image:
+    """Zonas donde la mayoría de píxeles vecinos son oscuros (fondo de botón o barra, no trazos de texto)."""
+    L = _luma(img)
+    H, W = L.shape
+    ii = np.pad((L < 130).astype(np.float32), ((1, 0), (1, 0))).cumsum(0).cumsum(1)
+    r = k // 2
+    y0, y1 = np.clip(np.arange(H) - r, 0, H), np.clip(np.arange(H) + r + 1, 0, H)
+    x0, x1 = np.clip(np.arange(W) - r, 0, W), np.clip(np.arange(W) + r + 1, 0, W)
+    area = (y1 - y0)[:, None] * (x1 - x0)[None, :]
+    frac = (ii[y1][:, x1] - ii[y0][:, x1] - ii[y1][:, x0] + ii[y0][:, x0]) / area
+    out = np.where((frac > 0.45) & (L > 150), 0, 255).astype(np.uint8)  # texto claro dentro de zona oscura -> negro
+    return Image.fromarray(out, "L")
+
+
 def run_tesseract(img: Image.Image) -> list[Word]:
     s = config.OCR_SCALE
     big = img.convert("L").resize((int(img.width * s), int(img.height * s)), Image.LANCZOS)
-    # Pasada 1: gris normal (texto oscuro sobre claro). Pasada 2: binarizado invertido, que convierte el texto
-    # blanco sobre fondos de color (botones azules, barra de título) en negro sobre blanco.
+    # Pasada 1: gris normal (texto oscuro sobre claro). Pasada 2: solo las zonas oscuras (botones azules, barra
+    # de título) invertidas y binarizadas, el resto en blanco: el texto blanco sobre color queda negro sobre blanco.
     words: list[Word] = []
-    light_on_dark = big.point(lambda p: 0 if p > 150 else 255)
+    light_on_dark = _dark_regions_inverted(img).resize(big.size, Image.LANCZOS)
     from concurrent.futures import ThreadPoolExecutor
 
     def _one(variant: Image.Image) -> str:
