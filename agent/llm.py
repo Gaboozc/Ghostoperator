@@ -117,6 +117,8 @@ Devuelve SOLO un JSON con UNA acción:
 {"accion":"clic","id":N,"texto":"Buscar"}                         // clic en el elemento N; "texto" = su texto visible (respaldo)
 {"accion":"clic_xy","x":X,"y":Y}                                  // solo si el elemento no está en la lista (coordenadas de la captura)
 {"accion":"escribir","id":N,"texto":"..."}                        // N = campo (rol campo) o su etiqueta; reemplaza el contenido
+{"accion":"escribir","x":X,"y":Y,"texto":"..."}                   // si el campo no tiene rol campo o el resultado dice que no se ve
+                                                                  // el valor: X,Y = centro de la caja del campo en la captura
 {"accion":"seleccionar","id":N,"opcion":"..."}                    // lista desplegable: N = la lista o su etiqueta; abre y elige en un solo paso
                                                                   // (no hagas "clic" para abrir listas desplegables)
 {"accion":"tecla","tecla":"enter|tab|escape|pagedown"}

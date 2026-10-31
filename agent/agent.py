@@ -306,18 +306,32 @@ class Session:
         if a == "escribir":
             e = self.el(act.get("id"))
             text = str(act.get("texto", ""))
+            if not e and act.get("x") is not None and act.get("y") is not None:
+                xx, yy = int(act["x"]), int(act["y"])
+                e = min(s.elements, key=lambda el: (el.cx - xx) ** 2 + (el.cy - yy) ** 2, default=None)
             if not e:
                 return "id inexistente"
             target = e
             if e.role != "campo":
-                target = s.field_for(e.text) or e
-            x, y = (target.cx, target.cy) if target.role == "campo" else (e.cx, e.y2 + 12)
+                # N puede ser el valor que ya está dentro de un campo: el campo (de tamaño razonable) que lo contiene
+                inside = [c for c in s.elements if c.role == "campo" and c.x <= e.cx <= c.x2 and c.y <= e.cy <= c.y2
+                          and c.x2 - c.x < 600]
+                target = inside[0] if inside else (s.field_for(e.text) or e)
+            if act.get("x") is not None and act.get("y") is not None:  # el modelo apunta a la caja en la captura
+                x, y = int(act["x"]), int(act["y"])
+            elif target.role == "campo":
+                x, y = target.cx, target.cy
+            else:  # N es una etiqueta: el campo (o su valor actual) está justo debajo
+                below = [b for b in s.elements if b is not e and 0 < b.y - e.y2 < 25 and abs(b.x - e.x) < 30]
+                x, y = (below[0].cx, below[0].cy) if below else (e.cx, e.y2 + 12)
             await self.vnc.replace_field(x, y, text)
             self.trace.actions += 1
             label = target.text.removeprefix("campo ")
             self.flow_steps.append({"accion": "escribir", "campo": label, "texto": self._slot(text)})
-            await self.look()
-            return f"escribí '{text}' en '{label}'"
+            ns = await self.look()
+            seen = not text or any(abs(o.cy - y) < 14 and difflib.SequenceMatcher(None, norm(o.text), norm(text)).ratio() > 0.8
+                                   for o in ns.elements)
+            return f"escribí '{text}' en '{label}'" + ("" if seen else " (no veo el valor en esa fila: puede que el clic no cayera en el campo)")
         if a == "seleccionar":
             e = self.el(act.get("id"))
             opt = str(act.get("opcion", ""))
