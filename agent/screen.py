@@ -151,7 +151,7 @@ class ScreenState:
         others = [e for e in self.elements if e.role not in ("menu", "celda")]
         cells = [e for e in self.elements if e.role == "celda"]
         for e in sorted(others, key=lambda e: (e.y, e.x)) + cells[:max(0, max_elems - len(others))]:
-            out.append(f"[{e.id}] ({e.role}) {e.text}")
+            out.append(f"[{e.id}] ({e.role}) {e.text}" + (f" @({e.cx},{e.cy})" if e.role == "campo" else ""))
         if self.table:
             out.append(f"Tabla visible: columnas={self.table.columns}, filas visibles={len(self.table.rows)}")
         return "\n".join(out)

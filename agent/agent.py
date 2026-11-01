@@ -80,6 +80,7 @@ class Session:
         self.route_used: Optional[list[str]] = None
         self.blocked_acts: set[str] = set()  # acciones repetidas sin efecto: no se vuelven a ejecutar
         self._drift_seen: Optional[str] = None
+        self.action_counts: dict[str, int] = {}  # cuántas veces se ejecutó exactamente la misma acción
         self.save_confirmed: Optional[str] = None  # aviso de éxito de la app tras guardar (ej. 'cambios aplicados')
 
     # ------------------------------------------------------------------ utilidades
@@ -342,6 +343,23 @@ class Session:
             self.last_save_button = text
         return None
 
+    def field_by_name(self, name: str) -> Optional[Element]:
+        """El campo cuya etiqueta se llama `name` (mejor que un id, que el modelo confunde entre filtros parecidos)."""
+        n = norm(name)
+        best, best_score = None, 0.0
+        for e in self.state.elements:
+            if e.role not in ("texto", "campo"):
+                continue
+            t = norm(e.text.removeprefix("campo "))
+            if not t or len(t) > 40:
+                continue
+            score = 1.0 if t == n else (0.9 if (n in t or t in n) and min(len(n), len(t)) >= 4
+                                        else difflib.SequenceMatcher(None, t, n).ratio())
+            score += 0.05 if e.role == "campo" else 0
+            if score > best_score:
+                best, best_score = e, score
+        return best if best_score >= 0.8 else None
+
     # ------------------------------------------------------------------ ejecutar una acción del modelo
     async def execute(self, act: dict) -> str:
         a = act.get("accion")
@@ -397,6 +415,8 @@ class Session:
         if a == "escribir":
             e = self.el(act.get("id"))
             text = str(act.get("texto", ""))
+            if act.get("campo"):  # por el nombre de la etiqueta: más fiable que un id entre filtros parecidos
+                e = self.field_by_name(str(act["campo"])) or e
             if not e and act.get("x") is not None and act.get("y") is not None:
                 xx, yy = int(act["x"]), int(act["y"])
                 e = min(s.elements, key=lambda el: (el.cx - xx) ** 2 + (el.cy - yy) ** 2, default=None)
@@ -421,7 +441,9 @@ class Session:
             after_zone = np.asarray(ns.img.convert("L").crop(zone), dtype=np.int16)
             # el OCR no lee bien el texto dentro de los campos pequeños: se compara la zona del clic antes y después
             changed = before_zone.shape == after_zone.shape and float(np.abs(before_zone - after_zone).mean()) > 1.5
-            return f"escribí '{text}' en '{label}'" + ("" if changed or not text else " (sin cambios visibles en esa zona; mira la captura)")
+            note = "" if changed or not text else " (sin cambios visibles en esa zona; mira la captura)"
+            return (f"escribí '{text}' en el campo '{label}' (en {x},{y}). Si querías otro campo, no repitas el mismo id: usa "
+                    f"escribir con \"campo\":\"<etiqueta exacta>\" o con x,y" + note)
         if a == "seleccionar":
             e = self.el(act.get("id"))
             opt = str(act.get("opcion", ""))
@@ -642,10 +664,15 @@ async def _run(sess: Session) -> tuple[str, str]:
 
         if not act.get("accion"):
             act["accion"] = "leer_tabla" if ("columna" in act or "filtros" in act) else None
-        if json.dumps({k: v for k, v in act.items() if k != "por_que"}, sort_keys=True) in sess.blocked_acts:
+        akey = json.dumps({k: v for k, v in act.items() if k != "por_que"}, sort_keys=True)
+        if act.get("accion") in ("clic", "clic_xy", "escribir", "seleccionar", "tecla") and sess.action_counts.get(akey, 0) >= 2:
+            result = (f"bloqueado: ya hiciste exactamente esto {sess.action_counts[akey]} veces sin avanzar. Cambia de enfoque: otro campo "
+                      "(escribir con \"campo\":\"<etiqueta>\" o con x,y), otro botón, otra pantalla; o termina fallida explicando por qué no se pudo")
+        elif json.dumps({k: v for k, v in act.items() if k != "por_que"}, sort_keys=True) in sess.blocked_acts:
             result = ("bloqueado: esta misma acción ya se repitió sin efecto; elige otra. Para cambiar de pantalla usa navegar "
                   "con la ruta completa del menú; si es un botón, clic_xy sobre la captura")
         elif act.get("accion"):
+            sess.action_counts[akey] = sess.action_counts.get(akey, 0) + 1
             result = await sess.execute(act)
         else:
             result = "falta 'accion' en el JSON; devuelve una acción válida"
