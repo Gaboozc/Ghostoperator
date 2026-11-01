@@ -423,14 +423,18 @@ class Session:
             if not e:
                 return "id inexistente"
             target = e
-            if e.role != "campo":
-                target = s.field_for(e.text) or e
+            # La caja de un "campo" detectado puede salir corrida (el recuadro de la etiqueta se mete sobre su borde): el punto
+            # de clic se calcula siempre desde la ETIQUETA (borde de la caja leído en píxeles), no desde la caja detectada.
+            label_el = e
+            if e.role == "campo":
+                name = norm(e.text.removeprefix("campo "))
+                label_el = next((o for o in s.elements if o.role != "campo" and norm(o.text) == name), None)
             if act.get("x") is not None and act.get("y") is not None:  # el modelo apunta a la caja en la captura
                 x, y = int(act["x"]), int(act["y"])
-            elif target.role == "campo":
-                x, y = target.cx, target.cy
-            else:  # N es la etiqueta o el valor que ya está dentro del campo
-                x, y = s.input_point(e)
+            elif label_el is not None:  # N es la etiqueta o el valor que ya está dentro del campo
+                x, y = s.input_point(label_el)
+            else:  # campo sin etiqueta localizable
+                x, y = e.cx, e.cy
             zone = (max(0, x - 90), max(0, y - 12), min(s.img.width, x + 90), min(s.img.height, y + 12))
             before_zone = np.asarray(s.img.convert("L").crop(zone), dtype=np.int16)
             await self.vnc.replace_field(x, y, text)
